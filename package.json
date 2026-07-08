@@ -1,0 +1,27 @@
+{
+  "name": "cutline",
+  "version": "0.1.0",
+  "description": "CLI for turning long-form recordings into content assets.",
+  "author": "cgalatro2",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "cutline": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
