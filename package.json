@@ -1,7 +1,7 @@
 {
   "name": "cutline",
   "version": "0.1.0",
-  "description": "CLI for turning long-form recordings into content assets.",
+  "description": "Open-source content pipeline for technical creators — find the publishable ideas inside a recording.",
   "author": "cgalatro2",
   "license": "MIT",
   "type": "module",
@@ -23,5 +23,10 @@
     "@types/node": "^24.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "dotenv": "^17.4.2",
+    "openai": "^6.45.0"
   }
 }
