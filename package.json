@@ -1,5 +1,5 @@
 {
-  "name": "cutline",
+  "name": "@cgalatro2/cutline",
   "version": "0.1.0",
   "description": "Open-source content pipeline for technical creators — find the publishable ideas inside a recording.",
   "author": "cgalatro2",
@@ -14,10 +14,34 @@
   "engines": {
     "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cgalatro2/cutline.git"
+  },
+  "homepage": "https://github.com/cgalatro2/cutline#readme",
+  "bugs": {
+    "url": "https://github.com/cgalatro2/cutline/issues"
+  },
+  "keywords": [
+    "cli",
+    "content",
+    "creators",
+    "transcription",
+    "youtube",
+    "shorts",
+    "tiktok",
+    "openai",
+    "ffmpeg",
+    "clips",
+    "clip",
+    "clipping",
+    "clipping ai"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
