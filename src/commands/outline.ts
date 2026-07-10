@@ -1,6 +1,7 @@
 import path from "node:path";
 import {
   assertReadableFile,
+  assertUnderUploadLimit,
   ensureDir,
   readTextFile,
   writeTextFile,
@@ -52,6 +53,7 @@ export async function runOutline(options: OutlineOptions): Promise<void> {
   console.log("Extracting audio with ffmpeg…");
   await extractAudio(videoPath, audioPath);
   console.log(`  → ${audioPath}`);
+  await assertUnderUploadLimit(audioPath);
 
   console.log("Transcribing with OpenAI (segment timestamps)…");
   const client = createOpenAIClient();
