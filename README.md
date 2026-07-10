@@ -92,14 +92,36 @@ Transcript:
 
 ## Develop from source
 
+Clone the repo and run your own local `cutline` while you hack:
+
 ```bash
 git clone https://github.com/cgalatro2/cutline.git
 cd cutline
 npm install
 cp .env.example .env   # set OPENAI_API_KEY
-npm run build
-npm link               # optional: put local `cutline` on PATH
+npm run build          # compiles to dist/ and marks the bin executable
+npm link               # puts this checkout's `cutline` on your PATH
+cutline clip ./demo.mp4
+```
+
+After code changes:
+
+```bash
+npm run build          # required — `cutline` runs dist/, not src/
+cutline clip ./demo.mp4
+```
+
+Or skip the link and run TypeScript directly:
+
+```bash
 npm run dev -- clip ./demo.mp4
+```
+
+To go back to the published npm version:
+
+```bash
+npm unlink -g @cgalatro2/cutline
+npm install -g @cgalatro2/cutline
 ```
 
 See [VISION.md](./VISION.md) for where this is headed.

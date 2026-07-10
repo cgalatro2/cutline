@@ -38,7 +38,7 @@
     "clipping ai"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "prepublishOnly": "npm run build"
