@@ -15,14 +15,14 @@ import {
   transcribeAudio,
 } from "../lib/openai.js";
 
-export type OutlineOptions = {
+export type ClipOptions = {
   /** Optional sectioned script. Omit for ad-hoc / video-only runs. */
   script?: string;
   video: string;
   out: string;
 };
 
-export async function runOutline(options: OutlineOptions): Promise<void> {
+export async function runClip(options: ClipOptions): Promise<void> {
   const videoPath = path.resolve(options.video);
   const outDir = path.resolve(options.out);
   const scriptPath = options.script

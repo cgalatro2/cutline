@@ -204,7 +204,7 @@ ${timestampedTranscript}`;
 
   const text = response.choices[0]?.message?.content?.trim();
   if (!text) {
-    throw new Error("OpenAI returned an empty publishable-clips outline.");
+    throw new Error("OpenAI returned an empty publishable-clips result.");
   }
   return text;
 }

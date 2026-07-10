@@ -18,11 +18,11 @@ Requirements:
 
 ```bash
 # one-shot
-npx @cgalatro2/cutline outline ./demo.mp4
+npx @cgalatro2/cutline clip ./demo.mp4
 
 # or install the `cutline` command globally
 npm install -g @cgalatro2/cutline
-cutline outline ./demo.mp4
+cutline clip ./demo.mp4
 ```
 
 Set your API key (either works):
@@ -37,13 +37,13 @@ cp .env.example .env   # if running from a clone
 
 ```bash
 # video only
-cutline outline ./demo.mp4
+cutline clip ./demo.mp4
 
 # with a script
-cutline outline ./demo.mp4 ./script.md
+cutline clip ./demo.mp4 ./script.md
 
 # custom output dir
-cutline outline ./demo.mp4 --out ./my-run
+cutline clip ./demo.mp4 --out ./my-run
 ```
 
 Produces:
@@ -99,7 +99,7 @@ npm install
 cp .env.example .env   # set OPENAI_API_KEY
 npm run build
 npm link               # optional: put local `cutline` on PATH
-npm run dev -- outline ./demo.mp4
+npm run dev -- clip ./demo.mp4
 ```
 
 See [VISION.md](./VISION.md) for where this is headed.

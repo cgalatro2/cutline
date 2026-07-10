@@ -2,7 +2,7 @@
 
 import { config as loadEnv } from "dotenv";
 import { Command } from "commander";
-import { runOutline } from "./commands/outline.js";
+import { runClip } from "./commands/clip.js";
 
 loadEnv({ quiet: true });
 
@@ -16,7 +16,7 @@ program
   .version("0.1.0");
 
 program
-  .command("outline")
+  .command("clip")
   .description(
     "Extract audio, transcribe, and find publishable Short/TikTok candidates (script optional)",
   )
@@ -25,7 +25,7 @@ program
   .option("-o, --out <dir>", "Output directory", "output")
   .action(async (video: string, script: string | undefined, opts: { out: string }) => {
     try {
-      await runOutline({ video, script, out: opts.out });
+      await runClip({ video, script, out: opts.out });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`\nError: ${message}`);
