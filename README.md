@@ -1,17 +1,49 @@
 # Cutline
 
+[![npm version](https://img.shields.io/npm/v/@cgalatro2/cutline.svg)](https://www.npmjs.com/package/@cgalatro2/cutline)
+
 Open-source content pipeline for technical creators.
 
 **Find the publishable ideas inside a recording.**
 
 Give Cutline a recording (and optionally a script). It builds a first-draft publishing queue — standalone Shorts/TikToks with creator-style titles, scores, and cut points.
 
+## Install
+
+Requirements:
+
+- Node.js 20+
+- [ffmpeg](https://ffmpeg.org/) on your PATH (`brew install ffmpeg`)
+- An [OpenAI API key](https://platform.openai.com/api-keys)
+
 ```bash
-# ad-hoc — video only
+# one-shot
+npx @cgalatro2/cutline outline ./demo.mp4
+
+# or install the `cutline` command globally
+npm install -g @cgalatro2/cutline
+cutline outline ./demo.mp4
+```
+
+Set your API key (either works):
+
+```bash
+export OPENAI_API_KEY=sk-...
+# or
+cp .env.example .env   # if running from a clone
+```
+
+## Usage
+
+```bash
+# video only
 cutline outline ./demo.mp4
 
 # with a script
 cutline outline ./demo.mp4 ./script.md
+
+# custom output dir
+cutline outline ./demo.mp4 --out ./my-run
 ```
 
 Produces:
@@ -50,36 +82,27 @@ Transcript:
 [0:07] …
 ```
 
-See [VISION.md](./VISION.md) for where this is headed.
-
-## Setup
-
-```bash
-npm install
-cp .env.example .env   # set OPENAI_API_KEY
-npm run build
-```
-
-Requirements:
-
-- Node.js 20+
-- [ffmpeg](https://ffmpeg.org/) on your PATH
-- An OpenAI API key
-
-## Usage
-
-```bash
-npm run dev -- outline ./demo.mp4 --out output
-npx cutline outline ./demo.mp4
-```
-
 ### Script format (optional)
 
 ```md
-- [SnowChat response]
+- [Camera angle]
   - Talking point one
   - Talking point two
 ```
+
+## Develop from source
+
+```bash
+git clone https://github.com/cgalatro2/cutline.git
+cd cutline
+npm install
+cp .env.example .env   # set OPENAI_API_KEY
+npm run build
+npm link               # optional: put local `cutline` on PATH
+npm run dev -- outline ./demo.mp4
+```
+
+See [VISION.md](./VISION.md) for where this is headed.
 
 ## License
 
