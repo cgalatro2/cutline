@@ -1,12 +1,23 @@
 # Vision
 
-Cutline turns long-form recordings into reusable content assets.
+Cutline is an open-source content pipeline for technical creators.
 
-The near-term goal is a focused CLI that can:
+## Mission
 
-1. Take a recording (and optional script/notes)
-2. Extract audio / transcript as needed
-3. Produce a structured outline of the session
-4. Grow into a creator pipeline (clips, posts, show notes, etc.)
+> Find the publishable ideas inside a recording.
 
-Start small: `cutline outline`. Expand from there.
+Titles, timestamps, transcripts, CapCut, blogs, newsletters — those are supporting surfaces. The core problem is identifying complete ideas worth shipping.
+
+## MVP promise
+
+> Give Cutline a recording (and optionally a script). It builds a first-draft publishing queue of standalone Shorts/TikToks.
+
+## Near-term
+
+1. Take a recording and an optional sectioned script
+2. Extract audio and transcribe with timestamps
+3. Produce `publishable-clips.md` — Title / Start / End / Score / Why / Transcript
+
+## Later
+
+Auto-cut, posts, show notes, captions, publishing, and scheduling — without changing the core mission.

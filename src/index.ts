@@ -1,29 +1,36 @@
 #!/usr/bin/env node
 
-/**
- * cutline — CLI entrypoint
- *
- * Usage (once wired up):
- *   cutline outline script.md demo.mp4
- */
+import { config as loadEnv } from "dotenv";
+import { Command } from "commander";
+import { runOutline } from "./commands/outline.js";
 
-const [, , command, ...args] = process.argv;
+loadEnv({ quiet: true });
 
-if (!command) {
-  console.error("Usage: cutline <command> [args...]");
-  console.error("");
-  console.error("Commands:");
-  console.error("  outline   Extract an outline from a recording");
-  process.exit(1);
-}
+const program = new Command();
 
-switch (command) {
-  case "outline": {
-    const { runOutline } = await import("./commands/outline.js");
-    await runOutline(args);
-    break;
-  }
-  default:
-    console.error(`Unknown command: ${command}`);
-    process.exit(1);
-}
+program
+  .name("cutline")
+  .description(
+    "Open-source content pipeline for technical creators — find the publishable ideas inside a recording.",
+  )
+  .version("0.1.0");
+
+program
+  .command("outline")
+  .description(
+    "Extract audio, transcribe, and find publishable Short/TikTok candidates (script optional)",
+  )
+  .argument("<video>", "Path to the recording (e.g. demo.mp4)")
+  .argument("[script]", "Optional path to a sectioned markdown script")
+  .option("-o, --out <dir>", "Output directory", "output")
+  .action(async (video: string, script: string | undefined, opts: { out: string }) => {
+    try {
+      await runOutline({ video, script, out: opts.out });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+program.parse();

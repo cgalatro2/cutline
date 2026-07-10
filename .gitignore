@@ -23,3 +23,5 @@ coverage/
 # Local scratch
 tmp/
 *.tmp
+output/
+output-*/
