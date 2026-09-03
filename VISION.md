@@ -4,20 +4,19 @@ Cutline is an open-source content pipeline for technical creators.
 
 ## Mission
 
-> Find the publishable ideas inside a recording.
+> Find the publishable ideas inside your work.
 
 Titles, timestamps, transcripts, CapCut, blogs, newsletters: those are supporting surfaces. The core problem is identifying complete ideas worth shipping.
 
 ## MVP promise
 
-> Give Cutline a recording (and optionally a script). It builds a first-draft publishing queue of standalone Shorts/TikToks.
+> Give Cutline your Cursor and ChatGPT conversations. It builds a first-draft publishing catalog.
 
 ## Near-term
 
-1. Take a recording and an optional sectioned script
-2. Extract audio and transcribe with timestamps
-3. Produce `publishable-clips.md`: Title / Start / End / Score / Why / Transcript
-4. `cutline harvest` mines Cursor and ChatGPT work conversations for the same kind of publishable ideas
+1. `cutline harvest` collects Cursor and ChatGPT work conversations
+2. Produce `ideas.md`: what happened, why it is interesting, core insight, and the formats that fit
+3. `cutline clip` mines a recording (and optional script) for standalone Shorts/TikToks
 
 ## Later
 

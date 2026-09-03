@@ -293,7 +293,7 @@ describe("collectChatgpt", () => {
       homedir: root,
       state: {
         ...emptyHarvestState(),
-        chatgpt: { conversations: first.conversations },
+        chatgpt: { conversations: first.conversations, initialized: true },
       },
       collect: { sealAll: false, includeMessages: true },
       deps: { skipSync: true, cacheDirs: [cache] },

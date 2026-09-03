@@ -26,6 +26,10 @@ export type ChatgptCollectResult = {
   conversations: Record<string, { messageIds: string[] }>;
 };
 
+export function isChatdumpMissing(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("not installed");
+}
+
 type MappingNode = {
   id?: string;
   parent?: string | null;

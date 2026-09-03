@@ -4,26 +4,26 @@
 
 Open-source content pipeline for technical creators.
 
-**Find the publishable ideas inside a recording.**
+**Find the publishable ideas inside your work.**
 
-Give Cutline a recording (and optionally a script). It builds a first-draft publishing queue: standalone Shorts/TikToks with creator-style titles, scores, and cut points.
+`cutline harvest` collects Cursor and ChatGPT conversations and builds a first-draft publishing catalog: what happened, why it is interesting, and the tweet, TikTok, or YouTube angle that fits.
 
 ## Install
 
 Requirements:
 
 - Node.js 20+
-- [ffmpeg](https://ffmpeg.org/) on your PATH (`brew install ffmpeg`) for `clip`
-- [chatdump](https://github.com/combinatrix-ai/chatdump) on your PATH for `harvest` (macOS menu bar app + CLI)
-- An [OpenAI API key](https://platform.openai.com/api-keys) for transcription and idea mining
+- An [OpenAI API key](https://platform.openai.com/api-keys) for idea mining (and for `clip` transcription)
+- Optional: [chatdump](https://github.com/combinatrix-ai/chatdump) on your PATH to include ChatGPT (macOS menu bar app + CLI)
+- Optional: [ffmpeg](https://ffmpeg.org/) on your PATH (`brew install ffmpeg`) for `clip`
 
 ```bash
 # one-shot
-npx @cgalatro2/cutline clip ./demo.mp4
+npx @cgalatro2/cutline harvest 3
 
 # or install the `cutline` command globally
 npm install -g @cgalatro2/cutline
-cutline clip ./demo.mp4
+cutline harvest 3
 ```
 
 Set your API key (either works):
@@ -34,7 +34,50 @@ export OPENAI_API_KEY=sk-...
 cp .env.example .env   # if running from a clone
 ```
 
-## Usage
+## Harvest conversations
+
+`cutline harvest` collects new Cursor and ChatGPT work conversations since the last successful run, writes a local archive, and mines it for publishable ideas. ChatGPT is included when [chatdump](https://github.com/combinatrix-ai/chatdump) is installed. Without it, harvest skips ChatGPT and still archives Cursor.
+
+First run, backfill the last few days and set the checkpoint:
+
+```bash
+cutline harvest 3
+cutline harvest 3 -m "Worked on Snowball auth"
+```
+
+Every run after that:
+
+```bash
+cutline harvest
+```
+
+Other options:
+
+```bash
+cutline harvest --since 3
+cutline harvest --no-analyze
+cutline harvest --out ./my-harvests
+```
+
+`--since` / the optional day argument is a backfill window. After the first successful harvest you do not need it. Archives and checkpoints stay on this machine:
+
+```txt
+~/.cutline/state.json
+~/.cutline/harvests/2026-09-02T175012/
+  harvest.json
+  conversations.md
+  ideas.md
+```
+
+`ideas.md` is a content catalog, not a tweet dump. Each idea includes only the formats that fit: a tweet, a TikTok, and/or a YouTube video.
+
+Cursor transcripts are read from `~/.cursor/projects/*/agent-transcripts`. ChatGPT conversations are synced with `chatdump sync`, then read from chatdump's local JSON cache. Conversation archives stay local and are gitignored.
+
+Analysis (on by default) sends harvested conversation text to OpenAI. There is no secret redaction. Use `--no-analyze` to archive without uploading. `OPENAI_API_KEY` is required unless you pass `--no-analyze`.
+
+## Clip a recording
+
+Give Cutline a recording (and optionally a script). It builds a first-draft publishing queue: standalone Shorts/TikToks with creator-style titles, scores, and cut points.
 
 ```bash
 # video only
@@ -91,47 +134,6 @@ Transcript:
   - Talking point two
 ```
 
-## Harvest conversations
-
-`cutline harvest` collects new Cursor and ChatGPT work conversations since the last successful run, writes a local archive, and mines it for publishable ideas.
-
-First run, backfill the last few days and set the checkpoint:
-
-```bash
-cutline harvest 3
-cutline harvest 3 -m "Worked on Snowball auth"
-```
-
-Every run after that:
-
-```bash
-cutline harvest
-```
-
-Other options:
-
-```bash
-cutline harvest --since 3
-cutline harvest --no-analyze
-cutline harvest --out ./my-harvests
-```
-
-`--since` / the optional day argument is a backfill window. After the first successful harvest you do not need it. Archives and checkpoints stay on this machine:
-
-```txt
-~/.cutline/state.json
-~/.cutline/harvests/2026-09-02T175012/
-  harvest.json
-  conversations.md
-  ideas.md
-```
-
-`ideas.md` is a content catalog, not a tweet dump. Each idea includes only the formats that fit: a tweet, a TikTok, and/or a YouTube video.
-
-Cursor transcripts are read from `~/.cursor/projects/*/agent-transcripts`. ChatGPT conversations are synced with `chatdump sync`, then read from chatdump's local JSON cache. Conversation archives stay local and are gitignored.
-
-`OPENAI_API_KEY` is required unless you pass `--no-analyze`.
-
 ## Develop from source
 
 Clone the repo and run your own local `cutline` while you hack:
@@ -143,20 +145,20 @@ npm install
 cp .env.example .env   # set OPENAI_API_KEY
 npm run build          # compiles to dist/ and marks the bin executable
 npm link               # puts this checkout's `cutline` on your PATH
-cutline clip ./demo.mp4
+cutline harvest 3
 ```
 
 After code changes:
 
 ```bash
 npm run build          # required. `cutline` runs dist/, not src/
-cutline clip ./demo.mp4
+cutline harvest 3
 ```
 
 Or skip the link and run TypeScript directly:
 
 ```bash
-npm run dev -- clip ./demo.mp4
+npm run dev -- harvest 3
 ```
 
 To go back to the published npm version:

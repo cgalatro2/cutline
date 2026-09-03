@@ -81,6 +81,16 @@ export function validateHarvestState(
     conversations[id] = { messageIds: [...new Set(messageIds)] };
   }
 
+  const initializedRaw = (chatgpt as Record<string, unknown>).initialized;
+  let initialized: boolean;
+  if (initializedRaw === undefined) {
+    initialized = true;
+  } else if (typeof initializedRaw === "boolean") {
+    initialized = initializedRaw;
+  } else {
+    throw invalidState(statePath);
+  }
+
   const last = rec.lastSuccessfulHarvestAt;
   if (last !== undefined && typeof last !== "string") {
     throw invalidState(statePath);
@@ -89,7 +99,7 @@ export function validateHarvestState(
   return {
     version: 1,
     cursor: { files },
-    chatgpt: { conversations },
+    chatgpt: { conversations, initialized },
     lastSuccessfulHarvestAt: last,
   };
 }

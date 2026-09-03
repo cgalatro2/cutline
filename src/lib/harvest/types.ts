@@ -16,6 +16,8 @@ export type HarvestState = {
   };
   chatgpt: {
     conversations: Record<string, { messageIds: string[] }>;
+    /** False until ChatGPT has been collected at least once. Missing chatdump leaves this false. */
+    initialized: boolean;
   };
   lastSuccessfulHarvestAt?: string;
 };
@@ -37,7 +39,7 @@ export function emptyHarvestState(): HarvestState {
   return {
     version: 1,
     cursor: { files: {} },
-    chatgpt: { conversations: {} },
+    chatgpt: { conversations: {}, initialized: false },
   };
 }
 

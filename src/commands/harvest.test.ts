@@ -146,6 +146,7 @@ describe("runHarvest", () => {
     const state = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(Object.keys(state.cursor.files).length, 1);
     assert.ok(state.chatgpt.conversations.c1);
+    assert.equal(state.chatgpt.initialized, true);
   });
 
   it("backfills a lookback window, then harvests only new messages", async () => {
@@ -378,13 +379,150 @@ describe("runHarvest", () => {
             skipSync: false,
             cacheDirs: [cacheDir],
             runChatdump: async () => {
-              throw new Error("chatdump is not installed or not on PATH.");
+              throw new Error("chatdump exited with code 1.\nlogin required");
             },
           },
         }),
-      /chatdump is not installed/,
+      /login required/,
     );
 
     assert.equal(await pathExists(statePath), false);
+  });
+
+  it("skips ChatGPT when chatdump is missing and still harvests Cursor", async () => {
+    const root = await tmpRoot();
+    const { projectsDir, cacheDir, out, statePath } = await setupDirs(root);
+    await writeCursor(
+      projectsDir,
+      "abc",
+      `${userLine("Cursor only", recentTs)}\n${assistantLine("Ok")}\n`,
+    );
+    await writeFile(
+      path.join(cacheDir, "c1.json"),
+      chatgptConversation("c1", "Hidden chat", recentSec, "Should not harvest"),
+    );
+
+    const result = await runHarvest({
+      days: 3,
+      analyze: false,
+      homedir: root,
+      cursorProjectsDir: projectsDir,
+      statePath,
+      out,
+      now,
+      chatgpt: {
+        skipSync: false,
+        cacheDirs: [cacheDir],
+        runChatdump: async () => {
+          throw new Error("chatdump is not installed or not on PATH.");
+        },
+      },
+    });
+
+    assert.equal(result.empty, false);
+    assert.deepEqual(
+      result.messages.map((m) => m.content).sort(),
+      ["Cursor only", "Ok"].sort(),
+    );
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    assert.equal(state.chatgpt.initialized, false);
+    assert.deepEqual(state.chatgpt.conversations, {});
+  });
+
+  it("seals ChatGPT without dumping history after chatdump is installed later", async () => {
+    const root = await tmpRoot();
+    const { projectsDir, cacheDir, out, statePath } = await setupDirs(root);
+    await writeCursor(
+      projectsDir,
+      "abc",
+      `${userLine("Cursor only", recentTs)}\n`,
+    );
+    await writeFile(
+      path.join(cacheDir, "c1.json"),
+      chatgptConversation("c1", "Old chat", recentSec, "History"),
+    );
+
+    await runHarvest({
+      days: 3,
+      analyze: false,
+      homedir: root,
+      cursorProjectsDir: projectsDir,
+      statePath,
+      out,
+      now,
+      chatgpt: {
+        skipSync: false,
+        cacheDirs: [cacheDir],
+        runChatdump: async () => {
+          throw new Error("chatdump is not installed or not on PATH.");
+        },
+      },
+    });
+
+    const later = await runHarvest({
+      analyze: false,
+      homedir: root,
+      cursorProjectsDir: projectsDir,
+      statePath,
+      out,
+      now: new Date("2026-09-02T20:00:00-07:00"),
+      chatgpt: { skipSync: true, cacheDirs: [cacheDir] },
+    });
+
+    assert.equal(later.empty, true);
+    assert.equal(later.messages.length, 0);
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    assert.equal(state.chatgpt.initialized, true);
+    assert.ok(state.chatgpt.conversations.c1);
+  });
+
+  it("backfills ChatGPT after chatdump is installed when a lookback window is passed", async () => {
+    const root = await tmpRoot();
+    const { projectsDir, cacheDir, out, statePath } = await setupDirs(root);
+    await writeCursor(
+      projectsDir,
+      "abc",
+      `${userLine("Cursor only", recentTs)}\n`,
+    );
+    await writeFile(
+      path.join(cacheDir, "c1.json"),
+      chatgptConversation("c1", "MCP architecture", recentSec, "What about MCP?"),
+    );
+
+    await runHarvest({
+      days: 3,
+      analyze: false,
+      homedir: root,
+      cursorProjectsDir: projectsDir,
+      statePath,
+      out,
+      now,
+      chatgpt: {
+        skipSync: false,
+        cacheDirs: [cacheDir],
+        runChatdump: async () => {
+          throw new Error("chatdump is not installed or not on PATH.");
+        },
+      },
+    });
+
+    const later = await runHarvest({
+      days: 3,
+      analyze: false,
+      homedir: root,
+      cursorProjectsDir: projectsDir,
+      statePath,
+      out,
+      now: new Date("2026-09-02T20:00:00-07:00"),
+      chatgpt: { skipSync: true, cacheDirs: [cacheDir] },
+    });
+
+    assert.equal(later.empty, false);
+    assert.deepEqual(
+      later.messages.map((m) => m.content).sort(),
+      ["Noted.", "What about MCP?"].sort(),
+    );
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    assert.equal(state.chatgpt.initialized, true);
   });
 });

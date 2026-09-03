@@ -7,7 +7,12 @@ import {
   renderConversationsMarkdown,
   writeHarvestDir,
 } from "../lib/harvest/archive.js";
-import { collectChatgpt, type ChatgptDeps } from "../lib/harvest/chatgpt.js";
+import {
+  collectChatgpt,
+  isChatdumpMissing,
+  type ChatgptCollectResult,
+  type ChatgptDeps,
+} from "../lib/harvest/chatgpt.js";
 import { collectCursor, defaultCursorProjectsDir } from "../lib/harvest/cursor.js";
 import {
   checkpointsEqual,
@@ -20,6 +25,7 @@ import {
   emptyHarvestState,
   sortMessages,
   sourceStats,
+  type HarvestCollectOptions,
   type HarvestState,
   type HarvestedMessage,
 } from "../lib/harvest/types.js";
@@ -67,41 +73,45 @@ export async function runHarvest(
       : undefined;
 
   const { state: current, existed } = await readHarvestState(statePath);
-  const sealAll = !existed;
-  const includeMessages = !(sealAll && sinceMs === undefined);
-  const collect = { sinceMs, sealAll, includeMessages };
+  const cursorCollect = collectOptions(!existed, sinceMs);
+  const chatgptCollect = collectOptions(!current.chatgpt.initialized, sinceMs);
 
   console.log("Scanning Cursor...");
   const cursor = await collectCursor({
     projectsDir,
     state: current,
-    collect,
+    collect: cursorCollect,
   });
   const cursorStats = sourceStats(cursor.messages);
   console.log(`  ${cursorStats.conversationCount} updated conversations`);
   console.log(`  ${cursorStats.messageCount} new messages`);
 
   console.log("\nSyncing ChatGPT...");
-  const chatgpt = await collectChatgpt({
+  const chatgpt = await collectChatgptOrSkip({
     homedir,
     state: current,
-    collect,
+    collect: chatgptCollect,
     deps: options.chatgpt,
   });
-  const chatgptStats = sourceStats(chatgpt.messages);
-  console.log(`  ${chatgptStats.conversationCount} updated conversations`);
-  console.log(`  ${chatgptStats.messageCount} new messages`);
+  if (!chatgpt.skipped) {
+    const chatgptStats = sourceStats(chatgpt.messages);
+    console.log(`  ${chatgptStats.conversationCount} updated conversations`);
+    console.log(`  ${chatgptStats.messageCount} new messages`);
+  }
 
   const proposed: HarvestState = {
     version: 1,
     cursor: { files: cursor.files },
-    chatgpt: { conversations: chatgpt.conversations },
+    chatgpt: {
+      conversations: chatgpt.conversations,
+      initialized: chatgpt.skipped ? current.chatgpt.initialized : true,
+    },
     lastSuccessfulHarvestAt: now.toISOString(),
   };
 
   const messages = sortMessages([...cursor.messages, ...chatgpt.messages]);
 
-  if (sealAll && sinceMs === undefined) {
+  if (!existed && sinceMs === undefined) {
     await writeHarvestState(statePath, proposed);
     console.log("\nInitialized harvest checkpoints.");
     console.log("No messages harvested. Next `cutline harvest` will collect new work.");
@@ -219,4 +229,38 @@ export function resolveHarvestDays(
     );
   }
   return Number(raw);
+}
+
+function collectOptions(
+  firstRun: boolean,
+  sinceMs: number | undefined,
+): HarvestCollectOptions {
+  return {
+    sinceMs,
+    sealAll: firstRun,
+    includeMessages: !(firstRun && sinceMs === undefined),
+  };
+}
+
+async function collectChatgptOrSkip(options: {
+  homedir: string;
+  state: HarvestState;
+  collect: HarvestCollectOptions;
+  deps?: ChatgptDeps;
+}): Promise<ChatgptCollectResult & { skipped: boolean }> {
+  try {
+    const result = await collectChatgpt(options);
+    return { ...result, skipped: false };
+  } catch (error) {
+    if (!isChatdumpMissing(error)) throw error;
+    console.log("  Skipped. chatdump is not installed.");
+    console.log(
+      "  Install from https://github.com/combinatrix-ai/chatdump to include ChatGPT.",
+    );
+    return {
+      messages: [],
+      conversations: options.state.chatgpt.conversations,
+      skipped: true,
+    };
+  }
 }
