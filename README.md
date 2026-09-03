@@ -6,15 +6,16 @@ Open-source content pipeline for technical creators.
 
 **Find the publishable ideas inside a recording.**
 
-Give Cutline a recording (and optionally a script). It builds a first-draft publishing queue — standalone Shorts/TikToks with creator-style titles, scores, and cut points.
+Give Cutline a recording (and optionally a script). It builds a first-draft publishing queue: standalone Shorts/TikToks with creator-style titles, scores, and cut points.
 
 ## Install
 
 Requirements:
 
 - Node.js 20+
-- [ffmpeg](https://ffmpeg.org/) on your PATH (`brew install ffmpeg`)
-- An [OpenAI API key](https://platform.openai.com/api-keys)
+- [ffmpeg](https://ffmpeg.org/) on your PATH (`brew install ffmpeg`) for `clip`
+- [chatdump](https://github.com/combinatrix-ai/chatdump) on your PATH for `harvest` (macOS menu bar app + CLI)
+- An [OpenAI API key](https://platform.openai.com/api-keys) for transcription and idea mining
 
 ```bash
 # one-shot
@@ -90,6 +91,47 @@ Transcript:
   - Talking point two
 ```
 
+## Harvest conversations
+
+`cutline harvest` collects new Cursor and ChatGPT work conversations since the last successful run, writes a local archive, and mines it for publishable ideas.
+
+First run, backfill the last few days and set the checkpoint:
+
+```bash
+cutline harvest 3
+cutline harvest 3 -m "Worked on Snowball auth"
+```
+
+Every run after that:
+
+```bash
+cutline harvest
+```
+
+Other options:
+
+```bash
+cutline harvest --since 3
+cutline harvest --no-analyze
+cutline harvest --out ./my-harvests
+```
+
+`--since` / the optional day argument is a backfill window. After the first successful harvest you do not need it. Archives and checkpoints stay on this machine:
+
+```txt
+~/.cutline/state.json
+~/.cutline/harvests/2026-09-02T175012/
+  harvest.json
+  conversations.md
+  ideas.md
+```
+
+`ideas.md` is a content catalog, not a tweet dump. Each idea includes only the formats that fit: a tweet, a TikTok, and/or a YouTube video.
+
+Cursor transcripts are read from `~/.cursor/projects/*/agent-transcripts`. ChatGPT conversations are synced with `chatdump sync`, then read from chatdump's local JSON cache. Conversation archives stay local and are gitignored.
+
+`OPENAI_API_KEY` is required unless you pass `--no-analyze`.
+
 ## Develop from source
 
 Clone the repo and run your own local `cutline` while you hack:
@@ -107,7 +149,7 @@ cutline clip ./demo.mp4
 After code changes:
 
 ```bash
-npm run build          # required — `cutline` runs dist/, not src/
+npm run build          # required. `cutline` runs dist/, not src/
 cutline clip ./demo.mp4
 ```
 
