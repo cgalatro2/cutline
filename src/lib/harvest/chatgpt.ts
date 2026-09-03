@@ -26,8 +26,15 @@ export type ChatgptCollectResult = {
   conversations: Record<string, { messageIds: string[] }>;
 };
 
-export function isChatdumpMissing(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("not installed");
+export class ChatdumpMissingError extends Error {
+  constructor() {
+    super(CHATGPT_SETUP_MESSAGE);
+    this.name = "ChatdumpMissingError";
+  }
+}
+
+export function isChatdumpMissing(error: unknown): error is ChatdumpMissingError {
+  return error instanceof ChatdumpMissingError;
 }
 
 type MappingNode = {
@@ -304,9 +311,7 @@ function uniqueStrings(ids: string[]): string[] {
 }
 
 function wrapChatdumpError(error: unknown): Error {
-  if (error instanceof Error && error.message.includes("not installed")) {
-    return error;
-  }
+  if (isChatdumpMissing(error)) return error;
   const detail = error instanceof Error ? error.message : String(error);
   return new Error(
     `chatdump sync failed. Re-login from the chatdump menu bar app and retry.\n${detail}`,
@@ -316,32 +321,42 @@ function wrapChatdumpError(error: unknown): Error {
 async function runChatdump(
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
-  let lastError: unknown;
   for (const binary of CHATGPT_BINARIES) {
     try {
       return await spawnCommand(binary, args);
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
-      if (err.code === "ENOENT" || (error instanceof Error && error.message.includes("not installed"))) {
-        lastError = error;
+      if (err.code === "ENOENT" || isChatdumpMissing(error)) {
         continue;
       }
       throw error;
     }
   }
-  throw lastError instanceof Error
-    ? new Error(CHATGPT_SETUP_MESSAGE)
-    : new Error(CHATGPT_SETUP_MESSAGE);
+  throw new ChatdumpMissingError();
 }
+
+const CHATDUMP_TIMEOUT_MS = 5 * 60 * 1000;
 
 function spawnCommand(
   command: string,
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      signal: AbortSignal.timeout(CHATDUMP_TIMEOUT_MS),
+      killSignal: "SIGTERM",
+    });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+
+    const finish = (error?: Error, result?: { stdout: string; stderr: string }) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(result!);
+    };
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -352,18 +367,18 @@ function spawnCommand(
 
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") {
-        reject(new Error(CHATGPT_SETUP_MESSAGE));
+        finish(new ChatdumpMissingError());
         return;
       }
-      reject(error);
+      finish(error);
     });
 
     child.on("close", (code) => {
       if (code === 0) {
-        resolve({ stdout, stderr });
+        finish(undefined, { stdout, stderr });
         return;
       }
-      reject(
+      finish(
         new Error(
           `chatdump exited with code ${code ?? "unknown"}.\n${stderr.trim()}`,
         ),

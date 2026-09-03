@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analyzeHarvest } from "./analyze.js";
+import { CHUNK_CHAR_BUDGET, analyzeHarvest, chunkConversations } from "./analyze.js";
 
 const candidate = {
   storyKey: "experiment-exposure",
@@ -76,9 +76,9 @@ describe("analyzeHarvest", () => {
           return {
             ideas: [
               {
+                ...candidate,
                 storyKey: "experiment-exposure",
                 score: 8.8,
-                ...candidate,
                 tweet: "We killed an experiment when the flag reached users outside the wizard.",
                 tikTok: "",
                 youTube: "How we learned our exposure event was not exposure.",
@@ -109,5 +109,133 @@ describe("analyzeHarvest", () => {
     assert.match(result.ideasMd, /### Disclosure risk/);
     assert.match(result.ideasMd, /### Source/);
     assert.doesNotMatch(result.ideasMd, /### Content catalog\n\n###/);
+  });
+
+  it("rejects merge targets that are dropped, chained, or cyclic", async () => {
+    const message = {
+      source: "cursor" as const,
+      conversationId: "c1",
+      role: "user" as const,
+      content: "The flag was read by users outside the wizard.",
+    };
+    const candidates = [
+      candidate,
+      { ...candidate, storyKey: "variant-b" },
+      { ...candidate, storyKey: "variant-c" },
+    ];
+    const cases = [
+      [
+        {
+          candidateId: "candidate-1-1",
+          action: "merge",
+          mergeIntoId: "candidate-1-2",
+          reason: "Merge into a dropped story.",
+        },
+        {
+          candidateId: "candidate-1-2",
+          action: "drop",
+          mergeIntoId: "",
+          reason: "Dropped.",
+        },
+        {
+          candidateId: "candidate-1-3",
+          action: "keep",
+          mergeIntoId: "",
+          reason: "Keep.",
+        },
+      ],
+      [
+        {
+          candidateId: "candidate-1-1",
+          action: "merge",
+          mergeIntoId: "candidate-1-2",
+          reason: "Chain start.",
+        },
+        {
+          candidateId: "candidate-1-2",
+          action: "merge",
+          mergeIntoId: "candidate-1-3",
+          reason: "Chain middle.",
+        },
+        {
+          candidateId: "candidate-1-3",
+          action: "keep",
+          mergeIntoId: "",
+          reason: "Keep.",
+        },
+      ],
+      [
+        {
+          candidateId: "candidate-1-1",
+          action: "merge",
+          mergeIntoId: "candidate-1-2",
+          reason: "Cycle a.",
+        },
+        {
+          candidateId: "candidate-1-2",
+          action: "merge",
+          mergeIntoId: "candidate-1-1",
+          reason: "Cycle b.",
+        },
+        {
+          candidateId: "candidate-1-3",
+          action: "keep",
+          mergeIntoId: "",
+          reason: "Keep.",
+        },
+      ],
+    ];
+
+    for (const decisions of cases) {
+      await assert.rejects(
+        () =>
+          analyzeHarvest([message], {
+            completeJson: async (_system, _user, schemaName) => {
+              if (schemaName === "harvest_candidates") {
+                return { candidates };
+              }
+              return { decisions };
+            },
+          }),
+        /merge target must be a kept candidate/,
+      );
+    }
+  });
+});
+
+describe("chunkConversations", () => {
+  it("keeps every chunk within the character budget", () => {
+    const longUser = "x".repeat(CHUNK_CHAR_BUDGET + 1_000);
+    const longAssistant = "y".repeat(5_000);
+    const chunks = chunkConversations(
+      [
+        {
+          source: "cursor",
+          conversationId: "huge",
+          conversationTitle: "Huge thread",
+          role: "user",
+          content: longUser,
+        },
+        {
+          source: "cursor",
+          conversationId: "huge",
+          conversationTitle: "Huge thread",
+          role: "assistant",
+          content: longAssistant,
+        },
+        {
+          source: "chatgpt",
+          conversationId: "other",
+          conversationTitle: "Other",
+          role: "user",
+          content: "short",
+        },
+      ],
+      `${"label-".repeat(200)}`,
+    );
+    assert.ok(chunks.length > 1);
+    for (const chunk of chunks) {
+      assert.ok(chunk.length <= CHUNK_CHAR_BUDGET, `${chunk.length} > ${CHUNK_CHAR_BUDGET}`);
+    }
   });
 });

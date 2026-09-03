@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { analyzeHarvest } from "../lib/harvest/analyze.js";
@@ -41,6 +42,7 @@ export type HarvestOptions = {
   statePath?: string;
   now?: Date;
   chatgpt?: ChatgptDeps;
+  writeState?: (statePath: string, state: HarvestState) => Promise<void>;
   analyzeFn?: (messages: HarvestedMessage[], label?: string) => Promise<{
     ideasMd: string;
     ideaCount: number;
@@ -144,18 +146,21 @@ export async function runHarvest(
       { ...emptyHarvestState(), cursor: proposed.cursor, chatgpt: proposed.chatgpt },
     );
     console.log("\nNo new Cursor or ChatGPT messages since the previous harvest.");
+    const persisted = unchanged
+      ? current
+      : {
+          ...proposed,
+          lastSuccessfulHarvestAt: current.lastSuccessfulHarvestAt,
+        };
     if (!unchanged) {
-      await writeHarvestState(statePath, {
-        ...proposed,
-        lastSuccessfulHarvestAt: current.lastSuccessfulHarvestAt,
-      });
+      await writeHarvestState(statePath, persisted);
       console.log("Checkpoint saved.");
     }
     return {
       messages: [],
       initialized: false,
       empty: true,
-      state: unchanged ? current : proposed,
+      state: persisted,
     };
   }
 
@@ -186,6 +191,7 @@ export async function runHarvest(
   const id = harvestIdFromDate(now);
   const archive = buildHarvestArchive(id, now, messages, options.message);
   const conversationsMd = renderConversationsMarkdown(archive, now);
+  const persistState = options.writeState ?? writeHarvestState;
   const dir = await writeHarvestDir({
     outRoot,
     id,
@@ -193,8 +199,12 @@ export async function runHarvest(
     conversationsMd,
     ideasMd,
   });
-
-  await writeHarvestState(statePath, proposed);
+  try {
+    await persistState(statePath, proposed);
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
 
   console.log(`\nWrote ${path.join(dir, "conversations.md")}`);
   if (ideasMd !== undefined) {

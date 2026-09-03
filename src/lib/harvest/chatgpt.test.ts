@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
-  CHATGPT_SETUP_MESSAGE,
+  ChatdumpMissingError,
   collectChatgpt,
   harvestConversation,
   linearizeConversation,
@@ -45,7 +45,19 @@ function conversationJson(options: {
     parent?: string | null;
   }>;
 }) {
-  const mapping: Record<string, unknown> = {};
+  const mapping: Record<
+    string,
+    {
+      id: string;
+      parent: string | null;
+      message: {
+        id: string;
+        author: { role: string };
+        create_time: number;
+        content: { parts: string[] };
+      };
+    }
+  > = {};
   let current = options.messages[options.messages.length - 1]?.id;
   for (const message of options.messages) {
     mapping[message.id] = {
@@ -326,12 +338,13 @@ describe("collectChatgpt", () => {
             skipSync: false,
             cacheDirs: [],
             runChatdump: async () => {
-              throw new Error(CHATGPT_SETUP_MESSAGE);
+              throw new ChatdumpMissingError();
             },
           },
         }),
       (err: unknown) =>
-        err instanceof Error && err.message.includes("chatdump is not installed"),
+        err instanceof ChatdumpMissingError &&
+          err.message.includes("chatdump is not installed"),
     );
   });
 });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile, utimes } from "node:fs/promises";
+import { Buffer } from "node:buffer";
+import { mkdir, rm, stat, writeFile, utimes } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -25,7 +26,6 @@ async function tmpRoot(): Promise<string> {
 }
 
 afterEach(async () => {
-  const { rm } = await import("node:fs/promises");
   await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -113,7 +113,16 @@ describe("cursor helpers", () => {
     const chunk = '{"a":1}\n{"b":2}';
     const { lines, newOffset } = splitCompleteLines(chunk, 10);
     assert.deepEqual(lines, ['{"a":1}']);
-    assert.equal(newOffset, 10 + '{"a":1}\n'.length);
+    assert.equal(newOffset, 10 + Buffer.byteLength('{"a":1}\n', "utf8"));
+  });
+
+  it("advances offsets by UTF-8 byte length", () => {
+    const line = '{"t":"café"}\n';
+    const rest = '{"x":1}';
+    const { lines, newOffset } = splitCompleteLines(`${line}${rest}`, 0);
+    assert.deepEqual(lines, ['{"t":"café"}']);
+    assert.equal(newOffset, Buffer.byteLength(line, "utf8"));
+    assert.notEqual(newOffset, line.length);
   });
 });
 
@@ -147,7 +156,6 @@ describe("collectCursor", () => {
     assert.equal(result.messages[0]?.workspace, "snowball");
     assert.equal(result.messages[1]?.role, "assistant");
     assert.equal(result.messages[1]?.content, "On it");
-    const { stat } = await import("node:fs/promises");
     const { size } = await stat(filePath);
     assert.equal(result.files[filePath]?.offset, size);
   });
@@ -190,6 +198,41 @@ describe("collectCursor", () => {
     assert.equal(second.messages.length, 2);
     assert.equal(second.messages[0]?.content, "Three");
     assert.equal(second.messages[1]?.content, "Four");
+  });
+
+  it("resumes after a multi-byte line using a byte offset", async () => {
+    const root = await tmpRoot();
+    const projectsDir = path.join(root, "projects");
+    const ts = "Wednesday, Sep 2, 2026, 5:51 PM (UTC-7)";
+    const first = `${userLine("café 🎯", ts)}\n`;
+    const filePath = await writeTranscript(
+      projectsDir,
+      "Users-chase-projects-snowball",
+      "abc",
+      first,
+    );
+    assert.notEqual(Buffer.byteLength(first, "utf8"), first.length);
+
+    const firstRun = await collectCursor({
+      projectsDir,
+      state: emptyHarvestState(),
+      collect: archiveAll,
+    });
+    const { size } = await stat(filePath);
+    assert.equal(firstRun.files[filePath]?.offset, size);
+
+    const extra = `${userLine("next", ts)}\n`;
+    await writeFile(filePath, first + extra);
+    const second = await collectCursor({
+      projectsDir,
+      state: {
+        ...emptyHarvestState(),
+        cursor: { files: firstRun.files },
+      },
+      collect: { sealAll: false, includeMessages: true },
+    });
+    assert.equal(second.messages.length, 1);
+    assert.equal(second.messages[0]?.content, "next");
   });
 
   it("picks up a new transcript between runs", async () => {
@@ -368,7 +411,6 @@ describe("collectCursor", () => {
 
     assert.equal(result.messages.length, 1);
     assert.equal(result.messages[0]?.content, "Recent work");
-    const { stat } = await import("node:fs/promises");
     assert.equal(result.files[recentPath]?.offset, (await stat(recentPath)).size);
     assert.equal(result.files[oldPath]?.offset, (await stat(oldPath)).size);
   });

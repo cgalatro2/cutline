@@ -171,7 +171,8 @@ export function splitCompleteLines(
     if (line.length > 0) lines.push(line);
     consumed = idx + 1;
   }
-  return { lines, newOffset: startOffset + consumed };
+  const consumedBytes = Buffer.byteLength(chunk.slice(0, consumed), "utf8");
+  return { lines, newOffset: startOffset + consumedBytes };
 }
 
 export function parseTranscriptLines(

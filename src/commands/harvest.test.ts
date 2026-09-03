@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { pathExists } from "../lib/files.js";
+import { harvestIdFromDate } from "../lib/harvest/archive.js";
+import { ChatdumpMissingError } from "../lib/harvest/chatgpt.js";
 import { runHarvest } from "./harvest.js";
 
 const tmpDirs: string[] = [];
@@ -414,7 +416,7 @@ describe("runHarvest", () => {
         skipSync: false,
         cacheDirs: [cacheDir],
         runChatdump: async () => {
-          throw new Error("chatdump is not installed or not on PATH.");
+          throw new ChatdumpMissingError();
         },
       },
     });
@@ -442,7 +444,7 @@ describe("runHarvest", () => {
       chatgptConversation("c1", "Old chat", recentSec, "History"),
     );
 
-    await runHarvest({
+    const first = await runHarvest({
       days: 3,
       analyze: false,
       homedir: root,
@@ -454,7 +456,7 @@ describe("runHarvest", () => {
         skipSync: false,
         cacheDirs: [cacheDir],
         runChatdump: async () => {
-          throw new Error("chatdump is not installed or not on PATH.");
+          throw new ChatdumpMissingError();
         },
       },
     });
@@ -471,9 +473,11 @@ describe("runHarvest", () => {
 
     assert.equal(later.empty, true);
     assert.equal(later.messages.length, 0);
+    assert.equal(later.state.lastSuccessfulHarvestAt, first.state.lastSuccessfulHarvestAt);
     const state = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(state.chatgpt.initialized, true);
     assert.ok(state.chatgpt.conversations.c1);
+    assert.equal(state.lastSuccessfulHarvestAt, first.state.lastSuccessfulHarvestAt);
   });
 
   it("backfills ChatGPT after chatdump is installed when a lookback window is passed", async () => {
@@ -501,7 +505,7 @@ describe("runHarvest", () => {
         skipSync: false,
         cacheDirs: [cacheDir],
         runChatdump: async () => {
-          throw new Error("chatdump is not installed or not on PATH.");
+          throw new ChatdumpMissingError();
         },
       },
     });
@@ -524,5 +528,36 @@ describe("runHarvest", () => {
     );
     const state = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(state.chatgpt.initialized, true);
+  });
+
+  it("rolls back the archive when checkpoint write fails", async () => {
+    const root = await tmpRoot();
+    const { projectsDir, cacheDir, out, statePath } = await setupDirs(root);
+    await writeCursor(
+      projectsDir,
+      "abc",
+      `${userLine("Keep me", recentTs)}\n${assistantLine("Ok")}\n`,
+    );
+
+    await assert.rejects(
+      () =>
+        runHarvest({
+          days: 3,
+          analyze: false,
+          homedir: root,
+          cursorProjectsDir: projectsDir,
+          statePath,
+          out,
+          now,
+          chatgpt: { skipSync: true, cacheDirs: [cacheDir] },
+          writeState: async () => {
+            throw new Error("disk full");
+          },
+        }),
+      /disk full/,
+    );
+
+    assert.equal(await pathExists(path.join(out, harvestIdFromDate(now))), false);
+    assert.equal(await pathExists(statePath), false);
   });
 });

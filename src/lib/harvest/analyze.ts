@@ -3,8 +3,9 @@ import { createOpenAIClient } from "../openai.js";
 import type { HarvestedMessage } from "./types.js";
 
 const IDEA_MODEL = "gpt-4o-mini";
-const CHUNK_CHAR_BUDGET = 60_000;
+export const CHUNK_CHAR_BUDGET = 60_000;
 const ASSISTANT_CHAR_CAP = 1_200;
+const LABEL_CHAR_CAP = 500;
 
 type JsonSchema = Record<string, unknown>;
 
@@ -271,19 +272,22 @@ export function chunkConversations(
   const sections = conversationSections(messages);
   if (sections.length === 0) return [];
 
-  const prefix = label ? `Context: ${label}\n\n` : "";
+  const prefix = label ? `Context: ${capText(label.trim(), LABEL_CHAR_CAP)}\n\n` : "";
+  const pieceLimit = Math.max(1, CHUNK_CHAR_BUDGET - prefix.length - 1);
   const chunks: string[] = [];
   let current = prefix;
 
   for (const section of sections) {
-    if (
-      current.length > prefix.length &&
-      current.length + section.length > CHUNK_CHAR_BUDGET
-    ) {
-      chunks.push(current.trimEnd());
-      current = prefix;
+    for (const piece of splitByLength(section, pieceLimit)) {
+      if (
+        current.length > prefix.length &&
+        current.length + piece.length + 1 > CHUNK_CHAR_BUDGET
+      ) {
+        chunks.push(current.trimEnd());
+        current = prefix;
+      }
+      current += `${piece}\n`;
     }
-    current += `${section}\n`;
   }
   if (current.trim()) chunks.push(current.trimEnd());
   return chunks;
@@ -407,6 +411,15 @@ function capText(text: string, max: number): string {
   return `${text.slice(0, max).trimEnd()}\n\n[truncated]`;
 }
 
+function splitByLength(text: string, max: number): string[] {
+  if (text.length <= max) return [text];
+  const pieces: string[] = [];
+  for (let i = 0; i < text.length; i += max) {
+    pieces.push(text.slice(i, i + max));
+  }
+  return pieces;
+}
+
 function validateCandidateBatch(value: unknown): string | undefined {
   const candidates = arrayProperty(value, "candidates");
   if (!candidates) return "candidates must be an array";
@@ -438,6 +451,7 @@ function validateReviewBatch(
   }
 
   const seen = new Set<string>();
+  const actionById = new Map<string, string>();
   for (const decision of decisions) {
     const problem = validateStrings(decision, ["candidateId", "action", "reason"]);
     if (problem) return `decision ${problem}`;
@@ -463,6 +477,16 @@ function validateReviewBatch(
     }
     if (action !== "merge" && mergeIntoId) {
       return "only merge decisions may set mergeIntoId";
+    }
+    actionById.set(candidateId, action);
+  }
+
+  for (const decision of decisions) {
+    if (!isRecord(decision)) return "decision must be an object";
+    if (stringProperty(decision, "action") !== "merge") continue;
+    const mergeIntoId = stringProperty(decision, "mergeIntoId")!;
+    if (actionById.get(mergeIntoId) !== "keep") {
+      return "a merge target must be a kept candidate";
     }
   }
   return undefined;
