@@ -1,7 +1,7 @@
 {
   "name": "@cgalatro2/cutline",
-  "version": "0.1.2",
-  "description": "Open-source content pipeline for technical creators — find the publishable ideas inside a recording.",
+  "version": "0.2.0",
+  "description": "Open-source content pipeline for technical creators. Harvest Cursor and ChatGPT conversations for publishable ideas.",
   "author": "cgalatro2",
   "license": "MIT",
   "type": "module",
@@ -26,21 +26,23 @@
     "cli",
     "content",
     "creators",
-    "transcription",
-    "youtube",
-    "shorts",
-    "tiktok",
+    "harvest",
+    "cursor",
+    "chatgpt",
+    "conversations",
     "openai",
+    "youtube",
+    "tiktok",
+    "shorts",
+    "transcription",
     "ffmpeg",
-    "clips",
-    "clip",
-    "clipping",
-    "clipping ai"
+    "clips"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/index.js",
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
+    "test": "tsx --test",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

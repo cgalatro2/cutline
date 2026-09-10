@@ -25,3 +25,5 @@ tmp/
 *.tmp
 output/
 output-*/
+harvests/
+.cutline/
