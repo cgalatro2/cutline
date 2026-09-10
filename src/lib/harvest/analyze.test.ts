@@ -1,213 +1,208 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CHUNK_CHAR_BUDGET, analyzeHarvest, chunkConversations } from "./analyze.js";
+import {
+  WINDOW_CHAR_BUDGET,
+  analyzeHarvest,
+  countMoments,
+  momentWindows,
+  stripNoise,
+} from "./analyze.js";
+import type { HarvestedMessage } from "./types.js";
 
-const candidate = {
-  storyKey: "experiment-exposure",
-  score: 8.5,
-  whatHappened: "The default event counted users who never saw the experiment.",
-  whyInteresting: "The experiment population was contaminated.",
-  coreInsight: "Exposure must represent the rendered experience.",
-  disclosureRisk: "Abstract the product and user details.",
-  source: "Cursor: onboarding experiment (conversation: c1)",
-  evidence: "The flag was read by users outside the wizard.",
+const exposure: HarvestedMessage = {
+  source: "cursor",
+  conversationId: "c1",
+  messageId: "m1",
+  conversationTitle: "Onboarding experiment",
+  workspace: "snowball",
+  timestamp: "2026-09-03T18:00:00.000Z",
+  role: "user",
+  content: "The flag was read by users outside the wizard.",
 };
 
+const testAccounts: HarvestedMessage = {
+  source: "cursor",
+  conversationId: "c2",
+  conversationTitle: "Metrics audit",
+  timestamp: "2026-09-03T19:00:00.000Z",
+  role: "user",
+  content: "Fifteen of 28 onboarded users were test accounts.",
+};
+
+describe("stripNoise", () => {
+  it("drops implementation chatter and keeps specific turns", () => {
+    const kept = stripNoise([
+      exposure,
+      {
+        source: "cursor",
+        conversationId: "c1",
+        role: "assistant",
+        content: "On it.",
+      },
+      {
+        source: "cursor",
+        conversationId: "c1",
+        role: "assistant",
+        content: "I'll drop email from the stub on line 94 and keep it in the popup.",
+      },
+      {
+        source: "cursor",
+        conversationId: "c1",
+        role: "assistant",
+        content: "```ts\nconst x = 1;\n```\n```ts\nconst y = 2;\n```",
+      },
+      {
+        source: "cursor",
+        conversationId: "c1",
+        role: "assistant",
+        content:
+          "The simpler shape is not localStorage. Instead, stop asking the extension which account it is.",
+      },
+      {
+        source: "cursor",
+        conversationId: "c1",
+        role: "user",
+        content: "ok",
+      },
+    ]);
+    assert.deepEqual(
+      kept.map((message) => message.content),
+      [
+        exposure.content,
+        "The simpler shape is not localStorage. Instead, stop asking the extension which account it is.",
+      ],
+    );
+  });
+});
+
 describe("analyzeHarvest", () => {
-  it("merges reviewed duplicates and renders every approved story", async () => {
+  it("clusters quoted moments and keeps a short nearby window", async () => {
+    const filler: HarvestedMessage[] = Array.from({ length: 20 }, (_, index) => ({
+      source: "cursor" as const,
+      conversationId: "c1",
+      conversationTitle: "Onboarding experiment",
+      workspace: "snowball",
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content: `Filler ${index} ${"x".repeat(200)}`,
+    }));
+    const thread = [
+      ...filler.slice(0, 10),
+      exposure,
+      {
+        source: "cursor" as const,
+        conversationId: "c1",
+        conversationTitle: "Onboarding experiment",
+        workspace: "snowball",
+        role: "assistant" as const,
+        content: "Exposure must represent the rendered experience.",
+      },
+      ...filler.slice(10),
+    ];
     const calls: string[] = [];
+    const result = await analyzeHarvest([...thread, testAccounts], {
+      completeJson: async (_system, _user, schemaName) => {
+        calls.push(schemaName);
+        if (schemaName !== "harvest_moments") {
+          throw new Error(`unexpected schema ${schemaName}`);
+        }
+        if (_user.includes("Fifteen of 28")) {
+          return {
+            moments: [
+              {
+                clusterKey: "test-account-metrics",
+                tag: "number",
+                quote: "Fifteen of 28 onboarded users were test accounts.",
+                conversationId: "c2",
+              },
+            ],
+          };
+        }
+        return {
+          moments: [
+            {
+              clusterKey: "experiment-exposure",
+              tag: "failure",
+              quote: "The flag was read by users outside the wizard.",
+              conversationId: "c1",
+            },
+            {
+              clusterKey: "experiment-exposure",
+              tag: "failure",
+              quote: "The flag was read by users outside the wizard.",
+              conversationId: "c1",
+            },
+          ],
+        };
+      },
+    });
+
+    assert.ok(calls.every((name) => name === "harvest_moments"));
+    assert.ok(calls.length >= 2);
+    assert.equal(result.momentCount, 2);
+    assert.equal(countMoments(result.momentsMd), 2);
+    assert.match(result.momentsMd, /# Harvest brief/);
+    assert.match(result.momentsMd, /## Moment 1: experiment-exposure/);
+    assert.match(result.momentsMd, /The flag was read by users outside the wizard/);
+    assert.match(result.momentsMd, /Fifteen of 28 onboarded users were test accounts/);
+    assert.match(result.momentsMd, /### Nearby/);
+    assert.match(result.momentsMd, /conversations\.md/);
+    assert.doesNotMatch(result.momentsMd, /### What happened/);
+    assert.doesNotMatch(result.momentsMd, /### Core insight/);
+    assert.doesNotMatch(result.momentsMd, /Filler 0 /);
+    assert.ok(result.momentsMd.length < 8_000);
+  });
+
+  it("drops invented quotes that are not in the conversation", async () => {
+    const result = await analyzeHarvest([exposure], {
+      completeJson: async () => ({
+        moments: [
+          {
+            clusterKey: "made-up",
+            tag: "opinion",
+            quote: "This quote does not exist in the thread.",
+            conversationId: "c1",
+          },
+        ],
+      }),
+    });
+    assert.equal(result.momentCount, 0);
+    assert.match(result.momentsMd, /No moments/);
+  });
+
+  it("drops worktree hygiene even when the quote is in the thread", async () => {
     const result = await analyzeHarvest(
       [
         {
           source: "cursor",
           conversationId: "c1",
-          messageId: "m1",
-          conversationTitle: "Onboarding experiment",
-          timestamp: "2026-09-03T18:00:00.000Z",
-          role: "user",
-          content: "The flag was read by users outside the wizard.",
+          conversationTitle: "Ready to merge?",
+          role: "assistant",
+          content:
+            "The build failure looks like an environment issue specific to this worktree, likely a missing .env.local.",
         },
       ],
       {
-        completeJson: async (_system, _user, schemaName) => {
-          calls.push(schemaName);
-          if (schemaName === "harvest_candidates") {
-            return {
-              candidates: [
-                candidate,
-                {
-                  ...candidate,
-                  score: 9,
-                  whatHappened: "The pre-auth ID and user ID had different variants.",
-                },
-                {
-                  ...candidate,
-                  storyKey: "test-account-metrics",
-                  whatHappened: "Fifteen of 28 onboarded users were test accounts.",
-                  coreInsight: "Verify the population before explaining a metric.",
-                },
-              ],
-            };
-          }
-          if (schemaName === "harvest_review") {
-            return {
-              decisions: [
-                {
-                  candidateId: "candidate-1-1",
-                  action: "keep",
-                  mergeIntoId: "",
-                  reason: "The most specific experiment story.",
-                },
-                {
-                  candidateId: "candidate-1-2",
-                  action: "merge",
-                  mergeIntoId: "candidate-1-1",
-                  reason: "A second detail of the same experiment failure.",
-                },
-                {
-                  candidateId: "candidate-1-3",
-                  action: "keep",
-                  mergeIntoId: "",
-                  reason: "A distinct and concrete analytics finding.",
-                },
-              ],
-            };
-          }
-          return {
-            ideas: [
-              {
-                ...candidate,
-                storyKey: "experiment-exposure",
-                score: 8.8,
-                tweet: "We killed an experiment when the flag reached users outside the wizard.",
-                tikTok: "",
-                youTube: "How we learned our exposure event was not exposure.",
-              },
-              {
-                ...candidate,
-                storyKey: "test-account-metrics",
-                score: 8.2,
-                whatHappened: "Fifteen of 28 onboarded users were test accounts.",
-                coreInsight: "Verify the population before explaining a metric.",
-                tweet: "15 of 28 onboarded users were test accounts.",
-                tikTok: "",
-                youTube: "",
-              },
-            ],
-          };
-        },
+        completeJson: async () => ({
+          moments: [
+            {
+              clusterKey: "build-failure",
+              tag: "failure",
+              quote:
+                "The build failure looks like an environment issue specific to this worktree, likely a missing .env.local.",
+              conversationId: "c1",
+            },
+          ],
+        }),
       },
     );
-
-    assert.deepEqual(calls, [
-      "harvest_candidates",
-      "harvest_review",
-      "harvest_catalog",
-    ]);
-    assert.equal(result.ideaCount, 2);
-    assert.equal((result.ideasMd.match(/^## Idea /gm) ?? []).length, 2);
-    assert.match(result.ideasMd, /### Disclosure risk/);
-    assert.match(result.ideasMd, /### Source/);
-    assert.doesNotMatch(result.ideasMd, /### Content catalog\n\n###/);
-  });
-
-  it("rejects merge targets that are dropped, chained, or cyclic", async () => {
-    const message = {
-      source: "cursor" as const,
-      conversationId: "c1",
-      role: "user" as const,
-      content: "The flag was read by users outside the wizard.",
-    };
-    const candidates = [
-      candidate,
-      { ...candidate, storyKey: "variant-b" },
-      { ...candidate, storyKey: "variant-c" },
-    ];
-    const cases = [
-      [
-        {
-          candidateId: "candidate-1-1",
-          action: "merge",
-          mergeIntoId: "candidate-1-2",
-          reason: "Merge into a dropped story.",
-        },
-        {
-          candidateId: "candidate-1-2",
-          action: "drop",
-          mergeIntoId: "",
-          reason: "Dropped.",
-        },
-        {
-          candidateId: "candidate-1-3",
-          action: "keep",
-          mergeIntoId: "",
-          reason: "Keep.",
-        },
-      ],
-      [
-        {
-          candidateId: "candidate-1-1",
-          action: "merge",
-          mergeIntoId: "candidate-1-2",
-          reason: "Chain start.",
-        },
-        {
-          candidateId: "candidate-1-2",
-          action: "merge",
-          mergeIntoId: "candidate-1-3",
-          reason: "Chain middle.",
-        },
-        {
-          candidateId: "candidate-1-3",
-          action: "keep",
-          mergeIntoId: "",
-          reason: "Keep.",
-        },
-      ],
-      [
-        {
-          candidateId: "candidate-1-1",
-          action: "merge",
-          mergeIntoId: "candidate-1-2",
-          reason: "Cycle a.",
-        },
-        {
-          candidateId: "candidate-1-2",
-          action: "merge",
-          mergeIntoId: "candidate-1-1",
-          reason: "Cycle b.",
-        },
-        {
-          candidateId: "candidate-1-3",
-          action: "keep",
-          mergeIntoId: "",
-          reason: "Keep.",
-        },
-      ],
-    ];
-
-    for (const decisions of cases) {
-      await assert.rejects(
-        () =>
-          analyzeHarvest([message], {
-            completeJson: async (_system, _user, schemaName) => {
-              if (schemaName === "harvest_candidates") {
-                return { candidates };
-              }
-              return { decisions };
-            },
-          }),
-        /merge target must be a kept candidate/,
-      );
-    }
+    assert.equal(result.momentCount, 0);
   });
 });
 
-describe("chunkConversations", () => {
-  it("keeps every chunk within the character budget", () => {
-    const longUser = "x".repeat(CHUNK_CHAR_BUDGET + 1_000);
-    const longAssistant = "y".repeat(5_000);
-    const chunks = chunkConversations(
+describe("momentWindows", () => {
+  it("keeps every window within the character budget", () => {
+    const longUser = "x".repeat(WINDOW_CHAR_BUDGET + 1_000);
+    const windows = momentWindows(
       [
         {
           source: "cursor",
@@ -221,7 +216,7 @@ describe("chunkConversations", () => {
           conversationId: "huge",
           conversationTitle: "Huge thread",
           role: "assistant",
-          content: longAssistant,
+          content: "The bug is that exposure counted the wrong users instead.",
         },
         {
           source: "chatgpt",
@@ -233,9 +228,12 @@ describe("chunkConversations", () => {
       ],
       `${"label-".repeat(200)}`,
     );
-    assert.ok(chunks.length > 1);
-    for (const chunk of chunks) {
-      assert.ok(chunk.length <= CHUNK_CHAR_BUDGET, `${chunk.length} > ${CHUNK_CHAR_BUDGET}`);
+    assert.ok(windows.length > 1);
+    for (const window of windows) {
+      assert.ok(
+        window.text.length <= WINDOW_CHAR_BUDGET,
+        `${window.text.length} > ${WINDOW_CHAR_BUDGET}`,
+      );
     }
   });
 });

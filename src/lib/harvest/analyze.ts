@@ -3,43 +3,57 @@ import { createOpenAIClient } from "../openai.js";
 import type { HarvestedMessage } from "./types.js";
 
 const IDEA_MODEL = "gpt-4o-mini";
-export const CHUNK_CHAR_BUDGET = 60_000;
-const ASSISTANT_CHAR_CAP = 1_200;
+export const WINDOW_CHAR_BUDGET = 8_000;
+const USER_WINDOW_CAP = 2_000;
+const ASSISTANT_WINDOW_CAP = 800;
+const NEARBY_ASSISTANT_CAP = 500;
+const NEARBY_USER_CAP = 700;
+const NEARBY_TOTAL_CAP = 800;
+const QUOTE_CHAR_CAP = 280;
+const MAX_QUOTES_PER_CLUSTER = 2;
+const MAX_MOMENTS_PER_CONVERSATION = 1;
 const LABEL_CHAR_CAP = 500;
+const MOMENT_TAGS = [
+  "decision",
+  "surprise",
+  "failure",
+  "number",
+  "reversal",
+  "opinion",
+] as const;
+
+type MomentTag = (typeof MOMENT_TAGS)[number];
+
+const TAG_RANK: Record<MomentTag, number> = {
+  reversal: 0,
+  surprise: 1,
+  failure: 2,
+  number: 3,
+  opinion: 4,
+  decision: 5,
+};
 
 type JsonSchema = Record<string, unknown>;
 
-type CandidateDraft = {
-  storyKey: string;
-  score: number;
-  whatHappened: string;
-  whyInteresting: string;
-  coreInsight: string;
-  disclosureRisk: string;
-  source: string;
-  evidence: string;
+type MomentDraft = {
+  clusterKey: string;
+  tag: string;
+  quote: string;
+  conversationId: string;
 };
 
-type Candidate = CandidateDraft & { id: string };
-
-type ReviewDecision = {
-  candidateId: string;
-  action: "keep" | "drop" | "merge";
-  mergeIntoId: string;
-  reason: string;
+type FoundMoment = {
+  clusterKey: string;
+  tag: MomentTag;
+  quote: string;
+  conversationId: string;
 };
 
-type FinalIdea = {
-  storyKey: string;
-  score: number;
-  whatHappened: string;
-  whyInteresting: string;
-  coreInsight: string;
-  tweet: string;
-  tikTok: string;
-  youTube: string;
-  disclosureRisk: string;
-  source: string;
+type MomentCluster = {
+  clusterKey: string;
+  tag: MomentTag;
+  quotes: string[];
+  conversationId: string;
 };
 
 type JsonCompletion = (
@@ -49,105 +63,44 @@ type JsonCompletion = (
   schema: JsonSchema,
 ) => Promise<unknown>;
 
-const CANDIDATE_SCHEMA: JsonSchema = {
+export type ConversationWindow = {
+  text: string;
+  conversationId: string;
+};
+
+const MOMENT_SCHEMA: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["candidates"],
+  required: ["moments"],
   properties: {
-    candidates: {
+    moments: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["storyKey", "score", "whatHappened", "whyInteresting", "coreInsight", "disclosureRisk", "source", "evidence"],
+        required: ["clusterKey", "tag", "quote", "conversationId"],
         properties: {
-          storyKey: { type: "string" },
-          score: { type: "number" },
-          whatHappened: { type: "string" },
-          whyInteresting: { type: "string" },
-          coreInsight: { type: "string" },
-          disclosureRisk: { type: "string" },
-          source: { type: "string" },
-          evidence: { type: "string" },
+          clusterKey: { type: "string" },
+          tag: { type: "string", enum: [...MOMENT_TAGS] },
+          quote: { type: "string" },
+          conversationId: { type: "string" },
         },
       },
     },
   },
 };
 
-const REVIEW_SCHEMA: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["decisions"],
-  properties: {
-    decisions: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["candidateId", "action", "mergeIntoId", "reason"],
-        properties: {
-          candidateId: { type: "string" },
-          action: { type: "string", enum: ["keep", "drop", "merge"] },
-          mergeIntoId: { type: "string" },
-          reason: { type: "string" },
-        },
-      },
-    },
-  },
-};
+const MOMENT_PROMPT = `You are a highlighter, not an editor.
 
-const CATALOG_SCHEMA: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["ideas"],
-  properties: {
-    ideas: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["storyKey", "score", "whatHappened", "whyInteresting", "coreInsight", "tweet", "tikTok", "youTube", "disclosureRisk", "source"],
-        properties: {
-          storyKey: { type: "string" },
-          score: { type: "number" },
-          whatHappened: { type: "string" },
-          whyInteresting: { type: "string" },
-          coreInsight: { type: "string" },
-          tweet: { type: "string" },
-          tikTok: { type: "string" },
-          youTube: { type: "string" },
-          disclosureRisk: { type: "string" },
-          source: { type: "string" },
-        },
-      },
-    },
-  },
-};
+Find moments a builder who does not work on this product would stop scrolling for: a reversal, failed approach, surprising number, hard decision, or sharp opinion.
 
-const EXTRACTOR_PROMPT = `Find every distinct, evidence-backed publishable story candidate in these work conversations.
+If there is no such moment, return an empty list. Empty is the common case. Prefer 0. At most 2 moments in one window, and only if they are different incidents.
 
-You are extracting raw material for an editor, not writing final content. Keep candidates with a specific surprise, changed mind, failed approach, strong opinion, product decision, tradeoff, or counterintuitive finding that a builder outside this company would care about.
+Skip ticket hygiene, merge conflicts, comment cleanup, CSS and tour tweaks, schema checks, implementation plans, and "I'll go edit the file" talk. Skip personal errands unless the beat is independently sharp.
 
-Drop routine implementation, branch hygiene, agent plans, tool traces, code dumps, generic advice, and anything below 8/10. Do not invent weak candidates to inflate the list.
+Do not write a thesis, insight, tweet, or summary. Copy the most specific direct quote, usually the user's surprise or the assistant's reversal, not the plan to change code. Use a short stable clusterKey for the same underlying incident. tag must be one of: decision, surprise, failure, number, reversal, opinion. Use number only for a surprising statistic, not ticket IDs or versions.
 
-Use the same short, stable storyKey for candidates about the same underlying story. Evidence must be a direct quote or precise fact from the conversation. Do not make a factual claim the evidence does not support. Source must name the conversation and supplied reference.`;
-
-const REVIEWER_PROMPT = `You are a rigorous editor reviewing candidate stories mined from work conversations.
-
-Return one decision for every candidate ID. Keep every independently publishable candidate. There is no target count. Drop generic advice, routine work, agent-process commentary, unsupported claims, and anything that does not clear 8/10.
-
-Merge candidates only when they tell the same underlying story. Use the most specific candidate as the merge target. Do not merge distinct stories merely because they share a topic such as onboarding, analytics, or feature flags.
-
-For keep and drop, mergeIntoId must be an empty string. For merge, it must be another candidate ID.`;
-
-const EDITOR_PROMPT = `You are the final editor of a technical creator's publishing catalog.
-
-Each supplied story group was approved by a reviewer. Return one final idea for every group. Keep each storyKey unchanged and combine related candidates into one specific, evidence-backed story.
-
-Do not introduce facts absent from the evidence. Prefer a concrete finding over a textbook lesson. Avoid generic advice, hashtags, exclamation-heavy marketing, and the phrases "highlights the importance", "underscores", "crucial", "data integrity", "best practices", and "don't underestimate".
-
-Every idea needs a score from 8.0 to 10.0, a non-empty disclosure risk, and a non-empty source. Set tweet, tikTok, or youTube to an empty string when that format does not fit.`;
+conversationId must copy a conversation: value from the supplied references. Never invent IDs or quotes.`;
 
 export async function analyzeHarvest(
   messages: HarvestedMessage[],
@@ -156,59 +109,134 @@ export async function analyzeHarvest(
     client?: OpenAI;
     completeJson?: JsonCompletion;
   } = {},
-): Promise<{ ideasMd: string; ideaCount: number }> {
+): Promise<{ momentsMd: string; momentCount: number }> {
   const client = options.client ?? (options.completeJson ? undefined : createOpenAIClient());
   const completeJson =
     options.completeJson ??
     ((system, user, schemaName, schema) =>
       completeJsonWithOpenAI(client!, system, user, schemaName, schema));
-  const chunks = chunkConversations(messages, options.label);
-  const candidates: Candidate[] = [];
+  const windows = momentWindows(messages, options.label);
+  const found: FoundMoment[] = [];
 
-  for (const [chunkIndex, chunk] of chunks.entries()) {
-    const result = await requestJson<{ candidates: CandidateDraft[] }>(
+  for (const window of windows) {
+    const result = await requestJson<{ moments: MomentDraft[] }>(
       completeJson,
-      EXTRACTOR_PROMPT,
-      chunk,
-      "harvest_candidates",
-      CANDIDATE_SCHEMA,
-      validateCandidateBatch,
+      MOMENT_PROMPT,
+      window.text,
+      "harvest_moments",
+      MOMENT_SCHEMA,
+      (value) => validateMomentBatch(value, window.conversationId),
     );
-    candidates.push(
-      ...result.candidates.map((candidate, candidateIndex) => ({
-        ...candidate,
-        id: `candidate-${chunkIndex + 1}-${candidateIndex + 1}`,
-      })),
+    found.push(
+      ...keepGroundedMoments(result.moments, messages, window.conversationId),
     );
   }
 
-  if (candidates.length === 0) {
-    return { ideasMd: "No promising ideas.\n", ideaCount: 0 };
+  const clusters = clusterMoments(found);
+  if (clusters.length === 0) {
+    return { momentsMd: renderBrief([], messages, options.label), momentCount: 0 };
   }
+  return {
+    momentsMd: renderBrief(clusters, messages, options.label),
+    momentCount: clusters.length,
+  };
+}
 
-  const review = await requestJson<{ decisions: ReviewDecision[] }>(
-    completeJson,
-    REVIEWER_PROMPT,
-    JSON.stringify({ candidates }),
-    "harvest_review",
-    REVIEW_SCHEMA,
-    (value) => validateReviewBatch(value, candidates),
-  );
-  const stories = approvedStories(candidates, review.decisions);
-  if (stories.length === 0) {
-    return { ideasMd: "No promising ideas.\n", ideaCount: 0 };
+export function stripNoise(messages: HarvestedMessage[]): HarvestedMessage[] {
+  return messages.filter((message) => !isNoise(message));
+}
+
+export function momentWindows(
+  messages: HarvestedMessage[],
+  label?: string,
+): ConversationWindow[] {
+  const prefix = label ? `Context: ${capText(label.trim(), LABEL_CHAR_CAP)}\n\n` : "";
+  const pieceLimit = Math.max(1, WINDOW_CHAR_BUDGET - prefix.length - 1);
+  const windows: ConversationWindow[] = [];
+
+  for (const group of groupByConversation(stripNoise(messages))) {
+    if (!group.messages.some((message) => message.role === "user")) continue;
+    let current = prefix;
+    for (const formatted of group.messages.map((message) => formatWindowMessage(message))) {
+      for (const piece of splitByLength(formatted, pieceLimit)) {
+        if (
+          current.length > prefix.length &&
+          current.length + piece.length + 1 > WINDOW_CHAR_BUDGET
+        ) {
+          windows.push({
+            text: current.trimEnd(),
+            conversationId: group.conversationId,
+          });
+          current = prefix;
+        }
+        current += `${piece}\n`;
+      }
+    }
+    if (current.trim()) {
+      windows.push({
+        text: current.trimEnd(),
+        conversationId: group.conversationId,
+      });
+    }
   }
+  return windows;
+}
 
-  const catalog = await requestJson<{ ideas: FinalIdea[] }>(
-    completeJson,
-    EDITOR_PROMPT,
-    JSON.stringify({ stories }),
-    "harvest_catalog",
-    CATALOG_SCHEMA,
-    (value) => validateCatalog(value, stories.map((story) => story.storyKey)),
+export function resequenceMoments(md: string): string {
+  let n = 0;
+  return md.replace(/^## Moment \d+/gm, () => {
+    n += 1;
+    return `## Moment ${n}`;
+  });
+}
+
+export function countMoments(md: string): number {
+  return (md.match(/^## Moment /gm) ?? []).length;
+}
+
+function isNoise(message: HarvestedMessage): boolean {
+  const text = message.content.trim();
+  if (!text) return true;
+  if (message.role === "user") return isNoiseUser(text);
+  return isNoiseAssistant(text);
+}
+
+function isNoiseUser(text: string): boolean {
+  return (
+    text.length <= 12 &&
+    /^(ok|okay|go|yes|lgtm|thanks|ty|continue|yep|sure)\.?$/i.test(text)
   );
-  const ideasMd = renderIdeasMarkdown(catalog.ideas);
-  return { ideasMd, ideaCount: catalog.ideas.length };
+}
+
+function isNoiseAssistant(text: string): boolean {
+  if (/^(done|on it|ok|okay|noted|got it|will do|sure|thanks|sounds good)[.!]?$/i.test(text)) {
+    return true;
+  }
+  if (codeRatio(text) >= 0.5) return true;
+  if (hasSpecificSignal(text)) return false;
+  return true;
+}
+
+function hasSpecificSignal(text: string): boolean {
+  return /\b(instead|actually|wrong|don't|fail(?:s|ed|ure)?|should have|we were|the bug|the issue|rather than|the simpler|leftover|the mistake)\b/i.test(
+    text,
+  );
+}
+
+function codeRatio(text: string): number {
+  if (!text) return 0;
+  let code = 0;
+  let inFence = false;
+  let last = 0;
+  const fence = /```/g;
+  let match: RegExpExecArray | null;
+  while ((match = fence.exec(text))) {
+    if (inFence) code += match.index + 3 - last;
+    last = match.index;
+    inFence = !inFence;
+  }
+  if (inFence) code += text.length - last;
+  return code / text.length;
 }
 
 async function completeJsonWithOpenAI(
@@ -220,7 +248,7 @@ async function completeJsonWithOpenAI(
 ): Promise<unknown> {
   const response = await client.chat.completions.create({
     model: IDEA_MODEL,
-    temperature: 0.3,
+    temperature: 0,
     response_format: {
       type: "json_schema",
       json_schema: {
@@ -236,12 +264,12 @@ async function completeJsonWithOpenAI(
   });
   const text = response.choices[0]?.message?.content?.trim();
   if (!text) {
-    throw new Error("OpenAI returned an empty harvest ideas result.");
+    throw new Error("OpenAI returned an empty harvest moments result.");
   }
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error("OpenAI returned invalid JSON for harvest ideas.");
+    throw new Error("OpenAI returned invalid JSON for harvest moments.");
   }
 }
 
@@ -265,110 +293,188 @@ async function requestJson<T>(
   throw new Error(`OpenAI returned an invalid ${schemaName} response: ${problem}`);
 }
 
-export function chunkConversations(
-  messages: HarvestedMessage[],
-  label?: string,
-): string[] {
-  const sections = conversationSections(messages);
-  if (sections.length === 0) return [];
-
-  const prefix = label ? `Context: ${capText(label.trim(), LABEL_CHAR_CAP)}\n\n` : "";
-  const pieceLimit = Math.max(1, CHUNK_CHAR_BUDGET - prefix.length - 1);
-  const chunks: string[] = [];
-  let current = prefix;
-
-  for (const section of sections) {
-    for (const piece of splitByLength(section, pieceLimit)) {
-      if (
-        current.length > prefix.length &&
-        current.length + piece.length + 1 > CHUNK_CHAR_BUDGET
-      ) {
-        chunks.push(current.trimEnd());
-        current = prefix;
-      }
-      current += `${piece}\n`;
+function validateMomentBatch(
+  value: unknown,
+  conversationId: string,
+): string | undefined {
+  const moments = arrayProperty(value, "moments");
+  if (!moments) return "moments must be an array";
+  for (const moment of moments) {
+    const problem = validateStrings(moment, ["clusterKey", "tag", "quote", "conversationId"]);
+    if (problem) return `moment ${problem}`;
+    if (!isRecord(moment)) return "moment must be an object";
+    if (!MOMENT_TAGS.includes(moment.tag as MomentTag)) {
+      return "moment tag must be a known tag";
+    }
+    if (stringProperty(moment, "conversationId") !== conversationId) {
+      return "moment conversationId must match the supplied conversation";
     }
   }
-  if (current.trim()) chunks.push(current.trimEnd());
-  return chunks;
+  return undefined;
 }
 
-export function resequenceIdeas(md: string): string {
-  let n = 0;
-  return md.replace(/^## Idea[^\n]*/gm, (line) => {
-    n += 1;
-    const score = line.match(/(\d+(?:\.\d+)?\s*\/\s*10)/);
-    return score ? `## Idea ${n} (${score[1]})` : `## Idea ${n}`;
+function keepGroundedMoments(
+  drafts: MomentDraft[],
+  messages: HarvestedMessage[],
+  conversationId: string,
+): FoundMoment[] {
+  const inConversation = messages.filter((message) => message.conversationId === conversationId);
+  const kept: FoundMoment[] = [];
+  for (const draft of drafts) {
+    if (!MOMENT_TAGS.includes(draft.tag as MomentTag)) continue;
+    const quote = draft.quote.trim();
+    const key = normalizeKey(draft.clusterKey);
+    if (!quote || !key || key.length < 4 || !/[a-z]/.test(key)) continue;
+    if (isPlanQuote(quote) || isHygieneQuote(quote)) continue;
+    const source = inConversation.find((message) => containsQuote(message.content, quote));
+    if (!source) continue;
+    if (isOffTopicThread(source)) continue;
+    if (source.role === "assistant" && !hasSpecificSignal(quote)) continue;
+    kept.push({
+      clusterKey: key,
+      tag: draft.tag as MomentTag,
+      quote,
+      conversationId,
+    });
+  }
+  return kept;
+}
+
+function clusterMoments(moments: FoundMoment[]): MomentCluster[] {
+  const groups = new Map<string, FoundMoment[]>();
+  const order: string[] = [];
+  for (const moment of moments) {
+    if (!groups.has(moment.clusterKey)) {
+      order.push(moment.clusterKey);
+      groups.set(moment.clusterKey, []);
+    }
+    groups.get(moment.clusterKey)!.push(moment);
+  }
+  const clustered = order.map((clusterKey) => {
+    const group = groups.get(clusterKey)!;
+    const tagCounts = new Map<MomentTag, number>();
+    for (const moment of group) {
+      tagCounts.set(moment.tag, (tagCounts.get(moment.tag) ?? 0) + 1);
+    }
+    const tag = [...tagCounts].sort((a, b) => b[1] - a[1])[0]![0];
+    return {
+      clusterKey,
+      tag,
+      quotes: uniqueStrings(group.map((moment) => moment.quote)).slice(
+        0,
+        MAX_QUOTES_PER_CLUSTER,
+      ),
+      conversationId: group[0]!.conversationId,
+    };
   });
-}
 
-export function countIdeas(md: string): number {
-  return (md.match(/^## Idea /gm) ?? []).length;
-}
-
-export function approvedStories(
-  candidates: Candidate[],
-  decisions: ReviewDecision[],
-): Array<{ storyKey: string; candidates: Candidate[] }> {
-  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const decisionsById = new Map(
-    decisions.map((decision) => [decision.candidateId, decision]),
+  const chosen = new Set<string>();
+  const byConversation = new Map<string, MomentCluster[]>();
+  for (const cluster of clustered) {
+    const list = byConversation.get(cluster.conversationId) ?? [];
+    list.push(cluster);
+    byConversation.set(cluster.conversationId, list);
+  }
+  for (const list of byConversation.values()) {
+    list.sort((a, b) => TAG_RANK[a.tag] - TAG_RANK[b.tag]);
+    for (const cluster of list.slice(0, MAX_MOMENTS_PER_CONVERSATION)) {
+      chosen.add(`${cluster.conversationId}:${cluster.clusterKey}`);
+    }
+  }
+  return clustered.filter((cluster) =>
+    chosen.has(`${cluster.conversationId}:${cluster.clusterKey}`),
   );
-  const stories = new Map<string, Candidate[]>();
+}
 
-  for (const candidate of candidates) {
-    const decision = decisionsById.get(candidate.id);
-    if (!decision || decision.action === "drop") continue;
-    const targetId =
-      decision.action === "merge" ? decision.mergeIntoId : candidate.id;
-    const target = byId.get(targetId);
-    if (!target) continue;
-    const group = stories.get(target.storyKey) ?? [];
-    group.push(candidate);
-    stories.set(target.storyKey, group);
+function renderBrief(
+  clusters: MomentCluster[],
+  messages: HarvestedMessage[],
+  label?: string,
+): string {
+  const conversations = new Set(messages.map((message) => message.conversationId));
+  const lines = [
+    "# Harvest brief",
+    "",
+    `${messages.length} messages across ${conversations.size} conversations. Full threads: conversations.md.`,
+    "",
+    "Paste this into a strong editor. Keep moments that are actually a post. Drop the rest. Do not genericize.",
+  ];
+  if (label?.trim()) {
+    lines.push("", `Context: ${label.trim()}`);
+  }
+  if (clusters.length === 0) {
+    lines.push("", "No moments.");
+    return `${lines.join("\n")}\n`;
   }
 
-  return [...stories].map(([storyKey, groupedCandidates]) => ({
-    storyKey,
-    candidates: groupedCandidates,
-  }));
+  for (const [index, cluster] of clusters.entries()) {
+    const sample = messages.find((message) => message.conversationId === cluster.conversationId);
+    const quotes = cluster.quotes
+      .map((quote) => `> ${capText(quote, QUOTE_CHAR_CAP).replace(/\n/g, "\n> ")}`)
+      .join("\n\n");
+    const nearby = nearbyTurns(messages, cluster.conversationId, cluster.quotes);
+    lines.push(
+      "",
+      `## Moment ${index + 1}: ${cluster.clusterKey}`,
+      "",
+      `- Tag: ${cluster.tag}`,
+      `- When: ${formatWhen(sample?.timestamp)}`,
+      `- Where: ${conversationLabel(sample)}`,
+      `- Archive: conversations.md → ${conversationLabel(sample)}`,
+      "",
+      "### Quote",
+      quotes,
+    );
+    if (nearby) {
+      lines.push("", "### Nearby", nearby);
+    }
+  }
+  return `${lines.join("\n")}\n`;
 }
 
-export function renderIdeasMarkdown(ideas: FinalIdea[]): string {
-  if (ideas.length === 0) return "No promising ideas.\n";
-  return `${ideas
-    .map((idea, index) => {
-      const formats = [
-        idea.tweet ? `**Tweet**\n${idea.tweet}` : "",
-        idea.tikTok ? `**TikTok**\n${idea.tikTok}` : "",
-        idea.youTube ? `**YouTube**\n${idea.youTube}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      return `## Idea ${index + 1} (${formatScore(idea.score)}/10)
-
-### What happened
-${idea.whatHappened}
-
-### Why it's interesting
-${idea.whyInteresting}
-
-### Core insight
-${idea.coreInsight}
-
-### Content catalog
-${formats}
-
-### Disclosure risk
-${idea.disclosureRisk}
-
-### Source
-${idea.source}`;
+function nearbyTurns(
+  messages: HarvestedMessage[],
+  conversationId: string,
+  quotes: string[],
+): string {
+  const thread = messages.filter((message) => message.conversationId === conversationId);
+  const hit = thread.findIndex((message) =>
+    quotes.some((quote) => containsQuote(message.content, quote)),
+  );
+  if (hit === -1) return "";
+  const start = Math.max(0, hit - 1);
+  const end = Math.min(thread.length, hit + 2);
+  const hitMessage = thread[hit]!;
+  const chosen = thread.slice(start, end).filter(
+    (message) => message === hitMessage || !isNoise(message),
+  );
+  const window = chosen.length > 0 ? chosen : [hitMessage];
+  const formatted = window
+    .map((message) => {
+      const who = message.role === "user" ? "User" : "Assistant";
+      const cap = message.role === "assistant" ? NEARBY_ASSISTANT_CAP : NEARBY_USER_CAP;
+      return `**${who}**\n\n${capText(message.content, cap)}`;
     })
-    .join("\n\n---\n\n")}\n`;
+    .join("\n\n");
+  return capText(formatted, NEARBY_TOTAL_CAP);
 }
 
-function conversationSections(messages: HarvestedMessage[]): string[] {
+function formatWindowMessage(message: HarvestedMessage): string {
+  const who = message.role === "user" ? "User" : "Assistant";
+  const cap = message.role === "assistant" ? ASSISTANT_WINDOW_CAP : USER_WINDOW_CAP;
+  const reference = [
+    `conversation: ${message.conversationId}`,
+    message.messageId ? `message: ${message.messageId}` : "",
+    message.timestamp ? `time: ${message.timestamp}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return `**${who}** (${reference})\n\n${capText(message.content, cap)}\n`;
+}
+
+function groupByConversation(
+  messages: HarvestedMessage[],
+): Array<{ conversationId: string; messages: HarvestedMessage[] }> {
   const order: string[] = [];
   const map = new Map<string, HarvestedMessage[]>();
   for (const message of messages) {
@@ -379,31 +485,61 @@ function conversationSections(messages: HarvestedMessage[]): string[] {
     }
     map.get(key)!.push(message);
   }
-
   return order.map((key) => {
     const group = map.get(key)!;
-    const first = group[0]!;
-    const source = first.source === "cursor" ? "Cursor" : "ChatGPT";
-    const title = first.workspace
-      ? `${first.workspace}: ${first.conversationTitle ?? first.conversationId}`
-      : (first.conversationTitle ?? first.conversationId);
-    const body = group
-      .map((m) => {
-        const who = m.role === "user" ? "User" : "Assistant";
-        const content =
-          m.role === "assistant" ? capText(m.content, ASSISTANT_CHAR_CAP) : m.content;
-        const reference = [
-          `conversation: ${m.conversationId}`,
-          m.messageId ? `message: ${m.messageId}` : "",
-          m.timestamp ? `time: ${m.timestamp}` : "",
-        ]
-          .filter(Boolean)
-          .join(", ");
-        return `**${who}** (${reference})\n\n${content}`;
-      })
-      .join("\n\n");
-    return `## ${source}\n\n### ${title}\n\n${body}\n`;
+    return { conversationId: group[0]!.conversationId, messages: group };
   });
+}
+
+function conversationLabel(message: HarvestedMessage | undefined): string {
+  if (!message) return "unknown";
+  const source = message.source === "cursor" ? "Cursor" : "ChatGPT";
+  const title = message.workspace
+    ? `${message.workspace}: ${message.conversationTitle ?? message.conversationId}`
+    : (message.conversationTitle ?? message.conversationId);
+  return `${source}: ${title}`;
+}
+
+function formatWhen(timestamp: string | undefined): string {
+  if (!timestamp) return "unknown";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function isPlanQuote(quote: string): boolean {
+  return /^(i(?:'ll| will|’ll)|let me )\b/i.test(quote.trim());
+}
+
+function isHygieneQuote(quote: string): boolean {
+  return /\b(worktree|\.env\.local|pre-existing (?:type )?errors?|poll reflexively|block_until_ms|gitignored env)\b/i.test(
+    quote,
+  );
+}
+
+function isOffTopicThread(message: HarvestedMessage): boolean {
+  const title = `${message.conversationTitle ?? ""} ${message.workspace ?? ""}`;
+  return /\b(fantasy|top 250 rankings|part availability)\b/i.test(title);
+}
+
+function containsQuote(content: string, quote: string): boolean {
+  const needle = quote.trim();
+  if (!needle) return false;
+  if (content.includes(needle)) return true;
+  const snippet = needle.slice(0, Math.min(80, needle.length));
+  return snippet.length >= 12 && content.includes(snippet);
+}
+
+function normalizeKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function capText(text: string, max: number): string {
@@ -420,113 +556,6 @@ function splitByLength(text: string, max: number): string[] {
   return pieces;
 }
 
-function validateCandidateBatch(value: unknown): string | undefined {
-  const candidates = arrayProperty(value, "candidates");
-  if (!candidates) return "candidates must be an array";
-  for (const candidate of candidates) {
-    const problem = validateStrings(candidate, [
-      "storyKey",
-      "whatHappened",
-      "whyInteresting",
-      "coreInsight",
-      "disclosureRisk",
-      "source",
-      "evidence",
-    ]);
-    if (problem) return `candidate ${problem}`;
-    if (!hasScore(candidate)) return "candidate score must be between 8 and 10";
-  }
-  return undefined;
-}
-
-function validateReviewBatch(
-  value: unknown,
-  candidates: Candidate[],
-): string | undefined {
-  const decisions = arrayProperty(value, "decisions");
-  if (!decisions) return "decisions must be an array";
-  const candidateIds = new Set(candidates.map((candidate) => candidate.id));
-  if (decisions.length !== candidateIds.size) {
-    return "a decision is required for every candidate";
-  }
-
-  const seen = new Set<string>();
-  const actionById = new Map<string, string>();
-  for (const decision of decisions) {
-    const problem = validateStrings(decision, ["candidateId", "action", "reason"]);
-    if (problem) return `decision ${problem}`;
-    if (!isRecord(decision)) return "decision must be an object";
-    if (typeof decision.mergeIntoId !== "string") {
-      return "decision mergeIntoId must be a string";
-    }
-    const candidateId = stringProperty(decision, "candidateId")!;
-    const action = stringProperty(decision, "action")!;
-    const mergeIntoId = stringProperty(decision, "mergeIntoId")!;
-    if (!candidateIds.has(candidateId) || seen.has(candidateId)) {
-      return "each decision must name one unique candidate ID";
-    }
-    seen.add(candidateId);
-    if (!["keep", "drop", "merge"].includes(action)) {
-      return "decision action must be keep, drop, or merge";
-    }
-    if (
-      action === "merge" &&
-      (!candidateIds.has(mergeIntoId) || mergeIntoId === candidateId)
-    ) {
-      return "a merge target must be a different candidate ID";
-    }
-    if (action !== "merge" && mergeIntoId) {
-      return "only merge decisions may set mergeIntoId";
-    }
-    actionById.set(candidateId, action);
-  }
-
-  for (const decision of decisions) {
-    if (!isRecord(decision)) return "decision must be an object";
-    if (stringProperty(decision, "action") !== "merge") continue;
-    const mergeIntoId = stringProperty(decision, "mergeIntoId")!;
-    if (actionById.get(mergeIntoId) !== "keep") {
-      return "a merge target must be a kept candidate";
-    }
-  }
-  return undefined;
-}
-
-function validateCatalog(
-  value: unknown,
-  expectedStoryKeys: string[],
-): string | undefined {
-  const ideas = arrayProperty(value, "ideas");
-  if (!ideas) return "ideas must be an array";
-  if (ideas.length !== expectedStoryKeys.length) {
-    return "the catalog must include every approved story exactly once";
-  }
-
-  const expected = new Set(expectedStoryKeys);
-  const seen = new Set<string>();
-  for (const idea of ideas) {
-    const problem = validateStrings(idea, [
-      "storyKey",
-      "whatHappened",
-      "whyInteresting",
-      "coreInsight",
-      "tweet",
-      "tikTok",
-      "youTube",
-      "disclosureRisk",
-      "source",
-    ]);
-    if (problem) return `idea ${problem}`;
-    if (!hasScore(idea)) return "idea score must be between 8 and 10";
-    const storyKey = stringProperty(idea, "storyKey")!;
-    if (!expected.has(storyKey) || seen.has(storyKey)) {
-      return "the catalog must use every approved storyKey exactly once";
-    }
-    seen.add(storyKey);
-  }
-  return undefined;
-}
-
 function arrayProperty(value: unknown, key: string): unknown[] | undefined {
   if (!isRecord(value)) return undefined;
   const property = value[key];
@@ -537,25 +566,9 @@ function validateStrings(value: unknown, keys: string[]): string | undefined {
   if (!isRecord(value)) return "must be an object";
   for (const key of keys) {
     if (typeof value[key] !== "string") return `${key} must be a string`;
-    if (
-      key !== "tweet" &&
-      key !== "tikTok" &&
-      key !== "youTube" &&
-      !value[key].trim()
-    ) {
-      return `${key} must not be empty`;
-    }
+    if (!value[key].trim()) return `${key} must not be empty`;
   }
   return undefined;
-}
-
-function hasScore(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    typeof value.score === "number" &&
-    value.score >= 8 &&
-    value.score <= 10
-  );
 }
 
 function stringProperty(value: unknown, key: string): string | undefined {
@@ -564,10 +577,18 @@ function stringProperty(value: unknown, key: string): string | undefined {
     : undefined;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
 }
 
-function formatScore(score: number): string {
-  return Number.isInteger(score) ? String(score) : score.toFixed(1);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

@@ -10,12 +10,12 @@ Titles, timestamps, transcripts, CapCut, blogs, newsletters: those are supportin
 
 ## MVP promise
 
-> Give Cutline your Cursor and ChatGPT conversations. It builds a first-draft publishing catalog.
+> Give Cutline your Cursor and ChatGPT conversations. It builds a moment brief a stronger editor can turn into posts.
 
 ## Near-term
 
 1. `cutline harvest` collects Cursor and ChatGPT work conversations
-2. Produce `ideas.md`: what happened, why it is interesting, core insight, and the formats that fit
+2. Produce `moments.md`: quoted moments with a short nearby window and a pointer to `conversations.md`
 3. `cutline clip` mines a recording (and optional script) for standalone Shorts/TikToks
 
 ## Later

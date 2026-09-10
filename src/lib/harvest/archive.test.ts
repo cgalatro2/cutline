@@ -9,7 +9,7 @@ import {
   renderConversationsMarkdown,
   writeHarvestDir,
 } from "./archive.js";
-import { chunkConversations, countIdeas, resequenceIdeas } from "./analyze.js";
+import { countMoments, momentWindows, resequenceMoments } from "./analyze.js";
 import { resolveHarvestDays } from "../../commands/harvest.js";
 import type { HarvestedMessage } from "./types.js";
 
@@ -73,7 +73,7 @@ describe("archive", () => {
       id: "2026-09-02T175012",
       harvestJson: "{}\n",
       conversationsMd: "# hi\n",
-      ideasMd: "## Idea 1\n",
+      momentsMd: "## Moment 1\n",
     });
     assert.equal(path.basename(dir), "2026-09-02T175012");
     assert.equal(await readFile(path.join(dir, "conversations.md"), "utf8"), "# hi\n");
@@ -83,18 +83,19 @@ describe("archive", () => {
 });
 
 describe("analyze helpers", () => {
-  it("chunks by conversation", () => {
-    const chunks = chunkConversations(sample, "label");
-    assert.equal(chunks.length, 1);
-    assert.match(chunks[0] ?? "", /Context: label/);
-    assert.match(chunks[0] ?? "", /Ship harvest/);
+  it("windows by conversation", () => {
+    const windows = momentWindows(sample, "label");
+    assert.equal(windows.length, 2);
+    assert.match(windows[0]?.text ?? "", /Context: label/);
+    assert.match(windows[0]?.text ?? "", /Let's ship harvest/);
+    assert.doesNotMatch(windows[0]?.text ?? "", /On it/);
   });
 
-  it("resequences idea headings", () => {
-    const md = resequenceIdeas("## Idea 1 (8/10)\n\n## Idea 1 (9/10)\n");
-    assert.match(md, /## Idea 1 \(8\/10\)/);
-    assert.match(md, /## Idea 2 \(9\/10\)/);
-    assert.equal(countIdeas(md), 2);
+  it("resequences moment headings", () => {
+    const md = resequenceMoments("## Moment 1: a\n\n## Moment 1: b\n");
+    assert.match(md, /## Moment 1: a/);
+    assert.match(md, /## Moment 2: b/);
+    assert.equal(countMoments(md), 2);
   });
 });
 

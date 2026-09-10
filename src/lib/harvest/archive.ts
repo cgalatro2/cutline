@@ -89,7 +89,7 @@ export async function writeHarvestDir(options: {
   id: string;
   harvestJson: string;
   conversationsMd: string;
-  ideasMd?: string;
+  momentsMd?: string;
 }): Promise<string> {
   const dest = path.join(options.outRoot, options.id);
   const tmp = path.join(options.outRoot, `.${options.id}.tmp`);
@@ -101,8 +101,8 @@ export async function writeHarvestDir(options: {
     options.conversationsMd,
     "utf8",
   );
-  if (options.ideasMd !== undefined) {
-    await writeFile(path.join(tmp, "ideas.md"), options.ideasMd, "utf8");
+  if (options.momentsMd !== undefined) {
+    await writeFile(path.join(tmp, "moments.md"), options.momentsMd, "utf8");
   }
   await ensureDir(options.outRoot);
   await rename(tmp, dest);

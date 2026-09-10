@@ -44,8 +44,8 @@ export type HarvestOptions = {
   chatgpt?: ChatgptDeps;
   writeState?: (statePath: string, state: HarvestState) => Promise<void>;
   analyzeFn?: (messages: HarvestedMessage[], label?: string) => Promise<{
-    ideasMd: string;
-    ideaCount: number;
+    momentsMd: string;
+    momentCount: number;
   }>;
 };
 
@@ -166,24 +166,24 @@ export async function runHarvest(
 
   console.log(`\nHarvested ${messages.length} new messages.`);
 
-  let ideasMd: string | undefined;
-  let ideaCount = 0;
+  let momentsMd: string | undefined;
+  let momentCount = 0;
   if (options.analyze) {
     if (!options.analyzeFn) requireApiKey();
-    console.log("\nFinding publishable ideas...");
+    console.log("\nFinding moments...");
     const result = options.analyzeFn
       ? await options.analyzeFn(messages, options.message)
       : await analyzeHarvest(messages, {
           label: options.message,
           client: createOpenAIClient(),
         });
-    ideasMd = result.ideasMd;
-    ideaCount = result.ideaCount;
-    if (ideaCount === 0) {
-      console.log("  No promising ideas found");
+    momentsMd = result.momentsMd;
+    momentCount = result.momentCount;
+    if (momentCount === 0) {
+      console.log("  No moments found");
     } else {
       console.log(
-        `  ${ideaCount} promising idea${ideaCount === 1 ? "" : "s"} found`,
+        `  ${momentCount} moment${momentCount === 1 ? "" : "s"} found`,
       );
     }
   }
@@ -197,7 +197,7 @@ export async function runHarvest(
     id,
     harvestJson: `${JSON.stringify(archive, null, 2)}\n`,
     conversationsMd,
-    ideasMd,
+    momentsMd,
   });
   try {
     await persistState(statePath, proposed);
@@ -207,8 +207,8 @@ export async function runHarvest(
   }
 
   console.log(`\nWrote ${path.join(dir, "conversations.md")}`);
-  if (ideasMd !== undefined) {
-    console.log(`Wrote ${path.join(dir, "ideas.md")}`);
+  if (momentsMd !== undefined) {
+    console.log(`Wrote ${path.join(dir, "moments.md")}`);
   }
   console.log("\nCheckpoint saved.");
 

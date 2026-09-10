@@ -6,7 +6,7 @@ Open-source content pipeline for technical creators.
 
 **Find the publishable ideas inside your work.**
 
-`cutline harvest` collects Cursor and ChatGPT conversations and builds a first-draft publishing catalog: what happened, why it is interesting, and the tweet, TikTok, or YouTube angle that fits.
+`cutline harvest` collects Cursor and ChatGPT conversations and turns them into a moment brief: quoted beats from your work, plus a pointer back to the full archive.
 
 ## Install
 
@@ -36,7 +36,7 @@ cp .env.example .env   # if running from a clone
 
 ## Harvest conversations
 
-`cutline harvest` collects new Cursor and ChatGPT work conversations since the last successful run, writes a local archive, and mines it for publishable ideas. ChatGPT is included when [chatdump](https://github.com/combinatrix-ai/chatdump) is installed. Without it, harvest skips ChatGPT and still archives Cursor.
+`cutline harvest` collects new Cursor and ChatGPT work conversations since the last successful run, writes a local archive, and mines it for moments. ChatGPT is included when [chatdump](https://github.com/combinatrix-ai/chatdump) is installed. Without it, harvest skips ChatGPT and still archives Cursor.
 
 First run, backfill the last few days and set the checkpoint:
 
@@ -66,10 +66,10 @@ cutline harvest --out ./my-harvests
 ~/.cutline/harvests/2026-09-02T175012/
   harvest.json
   conversations.md
-  ideas.md
+  moments.md
 ```
 
-`ideas.md` is a content catalog, not a tweet dump. Each idea includes only the formats that fit: a tweet, a TikTok, and/or a YouTube video.
+`conversations.md` is the full archive. `moments.md` is a paste-sized brief for a stronger editor: quotes, a tag, and one nearby turn. gpt-4o-mini only highlights. It does not write posts.
 
 Cursor transcripts are read from `~/.cursor/projects/*/agent-transcripts`. ChatGPT conversations are synced with `chatdump sync`, then read from chatdump's local JSON cache. Conversation archives stay local and are gitignored.
 

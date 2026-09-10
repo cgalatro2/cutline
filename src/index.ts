@@ -19,7 +19,7 @@ program
 program
   .command("harvest")
   .description(
-    "Collect new Cursor and ChatGPT work conversations and find publishable ideas",
+    "Collect new Cursor and ChatGPT work conversations and find moments",
   )
   .argument("[days]", "Backfill window in days (same as --since)")
   .option("-m, --message <text>", "Optional label for this harvest")
