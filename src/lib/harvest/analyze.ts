@@ -344,21 +344,22 @@ function clusterMoments(moments: FoundMoment[]): MomentCluster[] {
   const groups = new Map<string, FoundMoment[]>();
   const order: string[] = [];
   for (const moment of moments) {
-    if (!groups.has(moment.clusterKey)) {
-      order.push(moment.clusterKey);
-      groups.set(moment.clusterKey, []);
+    const groupKey = `${moment.conversationId}:${moment.clusterKey}`;
+    if (!groups.has(groupKey)) {
+      order.push(groupKey);
+      groups.set(groupKey, []);
     }
-    groups.get(moment.clusterKey)!.push(moment);
+    groups.get(groupKey)!.push(moment);
   }
-  const clustered = order.map((clusterKey) => {
-    const group = groups.get(clusterKey)!;
+  const clustered = order.map((groupKey) => {
+    const group = groups.get(groupKey)!;
     const tagCounts = new Map<MomentTag, number>();
     for (const moment of group) {
       tagCounts.set(moment.tag, (tagCounts.get(moment.tag) ?? 0) + 1);
     }
     const tag = [...tagCounts].sort((a, b) => b[1] - a[1])[0]![0];
     return {
-      clusterKey,
+      clusterKey: group[0]!.clusterKey,
       tag,
       quotes: uniqueStrings(group.map((moment) => moment.quote)).slice(
         0,

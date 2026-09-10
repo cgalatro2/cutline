@@ -170,8 +170,16 @@ describe("analyzeHarvest", () => {
   });
 
   it("drops worktree hygiene even when the quote is in the thread", async () => {
+    let called = 0;
     const result = await analyzeHarvest(
       [
+        {
+          source: "cursor",
+          conversationId: "c1",
+          conversationTitle: "Ready to merge?",
+          role: "user",
+          content: "is this branch ready to merge?",
+        },
         {
           source: "cursor",
           conversationId: "c1",
@@ -182,20 +190,74 @@ describe("analyzeHarvest", () => {
         },
       ],
       {
-        completeJson: async () => ({
-          moments: [
-            {
-              clusterKey: "build-failure",
-              tag: "failure",
-              quote:
-                "The build failure looks like an environment issue specific to this worktree, likely a missing .env.local.",
-              conversationId: "c1",
-            },
-          ],
-        }),
+        completeJson: async () => {
+          called += 1;
+          return {
+            moments: [
+              {
+                clusterKey: "build-failure",
+                tag: "failure",
+                quote:
+                  "The build failure looks like an environment issue specific to this worktree, likely a missing .env.local.",
+                conversationId: "c1",
+              },
+            ],
+          };
+        },
       },
     );
+    assert.ok(called >= 1);
     assert.equal(result.momentCount, 0);
+  });
+
+  it("keeps the same cluster key in different conversations as separate moments", async () => {
+    const auth: HarvestedMessage = {
+      source: "cursor",
+      conversationId: "c1",
+      conversationTitle: "Auth identity",
+      workspace: "snowball",
+      role: "user",
+      content: "Email was leftover. Identity is JWT sub.",
+    };
+    const pricing: HarvestedMessage = {
+      source: "cursor",
+      conversationId: "c2",
+      conversationTitle: "Pricing audit",
+      workspace: "frex",
+      role: "user",
+      content: "Verify production pricing before Batch 2.",
+    };
+    const result = await analyzeHarvest([auth, pricing], {
+      completeJson: async (_system, user) => {
+        if (user.includes("JWT sub")) {
+          return {
+            moments: [
+              {
+                clusterKey: "identity-change",
+                tag: "reversal",
+                quote: "Email was leftover. Identity is JWT sub.",
+                conversationId: "c1",
+              },
+            ],
+          };
+        }
+        return {
+          moments: [
+            {
+              clusterKey: "identity-change",
+              tag: "decision",
+              quote: "Verify production pricing before Batch 2.",
+              conversationId: "c2",
+            },
+          ],
+        };
+      },
+    });
+    assert.equal(result.momentCount, 2);
+    assert.match(result.momentsMd, /Auth identity/);
+    assert.match(result.momentsMd, /Pricing audit/);
+    assert.match(result.momentsMd, /Email was leftover/);
+    assert.match(result.momentsMd, /Verify production pricing/);
   });
 });
 
